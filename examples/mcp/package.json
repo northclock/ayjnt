@@ -1,5 +1,5 @@
 {
-  "name": "ayjnt-example-with-client",
+  "name": "ayjnt-example-mcp",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@cloudflare/workers-types": "4.20260413.1",
     "ayjnt": "file:../..",
     "wrangler": "4.82.1"
   }

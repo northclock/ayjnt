@@ -21,6 +21,11 @@ export type AgentEntry = {
   hasApp: boolean;
   /** Middleware files that apply to this agent, ordered root → leaf. Absolute paths. */
   middlewareChain: string[];
+  /** Name of the class this agent extends, as written in the source. We use
+   *  this to detect McpAgent subclasses and route them differently — the
+   *  Agents SDK provides a `.serve()` static for MCP that handles the MCP
+   *  protocol (streamable-http, SSE) at the transport layer. */
+  baseClass: string;
 };
 
 /** The full scan result. One per project. */

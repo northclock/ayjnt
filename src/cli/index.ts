@@ -2,11 +2,13 @@ import { dev } from "./dev.ts";
 import { build } from "./build.ts";
 import { deploy } from "./deploy.ts";
 import { migrate } from "./migrate.ts";
+import { newCmd } from "./new.ts";
 
 const USAGE = `\
 ayjnt <command> [options]
 
 Commands:
+  new <dir>        Scaffold a new ayjnt project (--with-ui for a React starter)
   dev              Start a local development server (wraps wrangler dev)
   build            Generate config + bundle, no deploy
   deploy           Build and deploy to Cloudflare (wraps wrangler deploy)
@@ -22,6 +24,8 @@ export async function run(args: string[]): Promise<void> {
   const [command, ...rest] = args;
 
   switch (command) {
+    case "new":
+      return newCmd(rest);
     case "dev":
       return dev(rest);
     case "build":

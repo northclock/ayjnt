@@ -16,7 +16,7 @@ describe("parseAgentSource", () => {
   test("extracts class name from simple default export", () => {
     expect(
       parseAgentSource(`export default class ChatAgent extends Agent {}`),
-    ).toEqual({ className: "ChatAgent", agentId: null });
+    ).toEqual({ className: "ChatAgent", baseClass: "Agent", agentId: null });
   });
 
   test("extracts class name with generic parameters", () => {
@@ -24,7 +24,7 @@ describe("parseAgentSource", () => {
       parseAgentSource(
         `export default class ChatAgent extends Agent<Env, ChatState> {}`,
       ),
-    ).toEqual({ className: "ChatAgent", agentId: null });
+    ).toEqual({ className: "ChatAgent", baseClass: "Agent", agentId: null });
   });
 
   test("extracts agentId override when present", () => {
@@ -34,8 +34,17 @@ describe("parseAgentSource", () => {
     `;
     expect(parseAgentSource(src)).toEqual({
       className: "ChatAgent",
+      baseClass: "Agent",
       agentId: "chat_v1",
     });
+  });
+
+  test("extracts base class name (e.g. McpAgent)", () => {
+    expect(
+      parseAgentSource(
+        `export default class Tools extends McpAgent<Env, State, Props> {}`,
+      ),
+    ).toEqual({ className: "Tools", baseClass: "McpAgent", agentId: null });
   });
 
   test("extracts agentId with explicit string annotation", () => {

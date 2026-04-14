@@ -48,6 +48,7 @@ export async function scan(root: string): Promise<Manifest> {
     entries.push({
       agentId: parsed.agentId ?? defaultAgentId(folderPath),
       className: parsed.className,
+      baseClass: parsed.baseClass,
       folderPath,
       routePath: folderToRoute(folderPath),
       binding: classNameToBinding(parsed.className),
@@ -64,23 +65,31 @@ export async function scan(root: string): Promise<Manifest> {
 }
 
 /**
- * Extract the default-exported class name and (optional) static agentId
- * from an agent.ts source file. Returns null if no class is found.
+ * Extract the default-exported class name, base class name, and (optional)
+ * static agentId from an agent.ts source file. Returns null if no class
+ * is found.
  *
  * Matches patterns like:
  *   export default class ChatAgent extends Agent { ... }
  *   export default class ChatAgent extends Agent<Env, State> { ... }
+ *   export default class Tools extends McpAgent<Env, State> { ... }
  *   export const agentId = "chat_v1";
  *   export const agentId: string = "chat_v1";
+ *
+ * The base class is returned as-is from the source — we use "McpAgent" to
+ * detect MCP agents at build time. If users alias imports (`import
+ * { McpAgent as Mcp }`), detection won't trigger; that's a documented
+ * limitation, not a bug.
  */
 export function parseAgentSource(source: string): {
   className: string;
+  baseClass: string;
   agentId: string | null;
 } | null {
   const classMatch = source.match(
-    /^[ \t]*export\s+default\s+class\s+([A-Za-z_$][\w$]*)\s+extends\b/m,
+    /^[ \t]*export\s+default\s+class\s+([A-Za-z_$][\w$]*)\s+extends\s+([A-Za-z_$][\w$]*)/m,
   );
-  if (!classMatch || !classMatch[1]) return null;
+  if (!classMatch || !classMatch[1] || !classMatch[2]) return null;
 
   const idMatch = source.match(
     /^[ \t]*export\s+const\s+agentId\s*(?::\s*string)?\s*=\s*["'`]([^"'`]+)["'`]/m,
@@ -88,6 +97,7 @@ export function parseAgentSource(source: string): {
 
   return {
     className: classMatch[1],
+    baseClass: classMatch[2],
     agentId: idMatch?.[1] ?? null,
   };
 }
@@ -119,6 +129,13 @@ export function folderToRoute(folderPath: string): string {
  */
 export function classNameToBinding(className: string): string {
   return className.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+}
+
+/** True when an agent extends McpAgent (by source-level name match). Users
+ *  who import McpAgent under an alias aren't detected — documented
+ *  limitation. */
+export function isMcpAgent(entry: { baseClass: string }): boolean {
+  return entry.baseClass === "McpAgent";
 }
 
 /**

@@ -3,16 +3,16 @@
   "migrations": [
     {
       "tag": "v1",
-      "timestamp": "2026-04-14T07:29:01.124Z",
+      "timestamp": "2026-04-14T14:29:01.193Z",
       "new_sqlite_classes": [
-        "ChatAgent"
+        "Tools"
       ]
     }
   ],
   "classes": {
-    "chat": {
-      "agentId": "chat",
-      "className": "ChatAgent",
+    "tools": {
+      "agentId": "tools",
+      "className": "Tools",
       "firstTag": "v1"
     }
   }

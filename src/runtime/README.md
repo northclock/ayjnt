@@ -9,8 +9,12 @@ What the user imports when they write `import { ... } from "ayjnt"` or any of it
 | `Agent`, `getAgent` | `"ayjnt"` | Main entry. Re-exports `Agent` from the Cloudflare SDK plus the `getAgent` helper. |
 | `Middleware`, `Context`, `Next` | `"ayjnt/middleware"` | Types for user-authored `middleware.ts` files. |
 | `getAgent` | `"ayjnt/rpc"` | The same typed inter-agent stub, available separately for when you only need RPC. |
+| `useAgent` | `"@ayjnt/<route>"` | Per-agent typed React hook, generated into `.ayjnt/client/<route>/index.tsx`. Bound to the agent's class and route prefix. |
+| `GeneratedEnv` | `"@ayjnt/env"` | Every DO binding typed against the correct agent class. Extend with your own KV/R2 bindings. |
 
 The generated worker entry imports `compose` and `createContext` from `"ayjnt/middleware"` too — those are framework-internal but live in the same module so generated code has a single import source.
+
+The `@ayjnt/*` aliases are defined in `.ayjnt/tsconfig.json` (regenerated on every build); your own tsconfig either extends it or inlines the paths. See the [main README's Co-located UI section](../../README.md#co-located-ui) for setup details.
 
 ## Middleware
 

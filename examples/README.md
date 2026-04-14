@@ -8,8 +8,8 @@ Reference projects that exercise the framework end-to-end. Each is a standalone 
 | [`with-client`](./with-client) | v0.1 | Connecting from the Agents client SDK using `basePath`. Explains the `path` vs `basePath` gotcha and the server-side `getAgentByName` requirement. |
 | [`middleware`](./middleware) | v0.2 | Layered `middleware.ts` chain, route groups, short-circuiting vs wrapping, `c.set`/`c.get` per-request stash. |
 | [`inter-agent`](./inter-agent) | v0.2 | Two agents calling each other via `getAgent<T>()` typed RPC, with oversell protection showing exception propagation. |
-| *(planned)* `with-ui` | v0.3 | Co-located `app.tsx`, generated `useAgent()` hook. |
-| *(planned)* `mcp` | v0.4 | MCP App — `McpAgent` + UI for the iframe. |
+| [`with-ui`](./with-ui) | v0.3 | Co-located `app.tsx`, generated typed `useAgent()` hook, multi-tab live state sync. |
+| [`mcp`](./mcp) | v0.4 | Tool server extending `McpAgent`, auto-routed through `McpAgent.serve()`. Client demo calls `echo` and `add`. |
 
 ## Running an example
 

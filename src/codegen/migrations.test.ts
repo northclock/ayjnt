@@ -20,6 +20,7 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
   return {
     agentId: "chat",
     className: "ChatAgent",
+    baseClass: "Agent",
     folderPath: "chat",
     routePath: "/chat",
     binding: "CHAT_AGENT",

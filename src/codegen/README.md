@@ -32,10 +32,11 @@ agents/ ────────────► Manifest
 
 | File | Role |
 |---|---|
-| [`scan.ts`](./scan.ts) | Walk `agents/**/agent.ts`, extract class/agentId, compute routes/bindings/middleware chains. Produces `Manifest`. |
+| [`scan.ts`](./scan.ts) | Walk `agents/**/agent.ts`, extract class/agentId, compute routes/bindings/middleware chains, detect `app.tsx` siblings. Produces `Manifest`. |
 | [`migrations.ts`](./migrations.ts) | Read/write `.ayjnt/migrations.json`. `diffMigrations` + `applyDiff` + `nextTag` + `formatDiff`. |
 | [`wrangler.ts`](./wrangler.ts) | Emit the generated `wrangler.jsonc` string. Pure. |
-| [`entry.ts`](./entry.ts) | Emit the generated worker entrypoint string. Pure. |
+| [`entry.ts`](./entry.ts) | Emit the generated worker entrypoint string (routes, middleware dispatch, HTML-vs-agent disambiguation). Pure. |
+| [`client.ts`](./client.ts) | Generate `.ayjnt/tsconfig.json`, `env.d.ts`, per-agent typed `useAgent` hooks, and bundle `app.tsx` via `Bun.build`. |
 
 ## Contracts
 
@@ -76,6 +77,80 @@ At diff time:
 Cloudflare's helper expects `/agents/{kebab-name}/{instance-id}/...`. We want `/chat/:id`, `/admin/users/:id`, route groups `(public)`, and nested middleware. Rolling our own dispatch in `generateEntry` is ~40 lines of generated TypeScript and gives us full control over the URL shape.
 
 The generated entrypoint still re-exports every agent class so wrangler can register them as DOs — that's the only constraint the SDK imposes.
+
+## Client-side generation (v0.3)
+
+Beyond the worker bundle, codegen also produces files user code imports from:
+
+```
+.ayjnt/
+├── tsconfig.json               ← path aliases (@ayjnt/*, @ayjnt/env)
+├── env.d.ts                    ← GeneratedEnv type with every DO binding
+└── client/
+    └── <route>/index.tsx       ← typed useAgent hook per agent
+```
+
+User code imports via the `@ayjnt/*` alias defined in the generated tsconfig. The alias maps `@ayjnt/chat` → `.ayjnt/client/chat/index.tsx`. Users either `extends` the generated tsconfig or inline the paths (see main README).
+
+### Why generate per-agent hooks instead of one generic helper
+
+We could ship a single `useAgent<AgentClass>({ route, name })` helper in the runtime. We don't, because:
+
+1. **URL-derived `basePath`.** The hook inspects `window.location.pathname` to figure out the instance name. Per-agent generation lets us bake the route prefix in — a generic helper would require the user to pass it every time, and get it right.
+2. **Default state inference.** `InstanceType<typeof AgentClass>["state"]` gives us the default State type for the hook. Generic would require the user to pass it.
+3. **Compile-time discoverability.** `@ayjnt/chat` either exists (the agent is in the manifest) or doesn't (you forgot to add `agents/chat/`). A generic helper couldn't offer this check.
+
+The cost is a per-agent file instead of one shared helper. Cheap.
+
+### Bundling `app.tsx`
+
+`bundleApp()` in `client.ts` calls `Bun.build` with `target: "browser"` on each agent's `app.tsx`. The output ES module is inlined as a string into the HTML shell, which is in turn inlined into `entry.ts` as a map from binding → HTML. One `<script type="module">…</script>` per agent, no asset fetching, no CORS.
+
+Gotchas in the bundler path:
+
+- **Order matters.** We generate `.ayjnt/client/<route>/index.tsx` *before* calling `Bun.build`, because the user's `app.tsx` imports from `@ayjnt/<route>` which resolves to that file. Bundling first → unresolved import.
+- **Tree-shaking is per-agent.** Each agent's bundle includes its own copy of React + agents/react. Two agents with `app.tsx` = ~2× the bundle size. Acceptable for v0.3; an Assets-binding-backed approach (shared chunks, browser caching) is future work.
+- **Worker size limit.** Cloudflare Workers bundle limit is 10 MB. Inlining bundles is fine until you have ~20 agents with full React UIs. At that point, move to `@cloudflare/workers-types` Assets binding.
+
+### Why `html_handling: "none"` matters
+
+The generated wrangler config sets `html_handling: "none"` on the Assets binding. That's a bug-avoidance flag, not a preference.
+
+Cloudflare Assets' default (`auto-trailing-slash`) issues a **301 redirect** from `/foo/bar/index.html` → `/foo/bar/`. It's an SEO nicety for static sites. For us, it breaks:
+
+1. Browser navigates to `/counter/room-1` (HTML request).
+2. Worker matches the route, calls `env.ASSETS.fetch(new Request("/__ayjnt/counter/index.html", request))`.
+3. Assets binding returns a **301 to `/__ayjnt/counter/`**.
+4. Worker forwards that 301 to the browser.
+5. Browser follows the redirect. URL bar now reads `/__ayjnt/counter/`.
+6. Assets binding serves the HTML there (trailing slash → `index.html`). Content renders.
+7. The generated `useAgent` hook reads `window.location.pathname = "/__ayjnt/counter/"`, sees it doesn't start with `/counter`, falls back to `"default"` instance.
+8. Every user is now on `/counter/default` regardless of which URL they originally visited.
+
+`html_handling: "none"` disables the rewrite so step 3 returns a plain `200 text/html`, the worker forwards it unchanged, and the browser URL stays at the user's original `/counter/room-1`.
+
+Worth reading the config comment in `wrangler.ts` before changing this.
+
+### HTML-vs-agent routing in `entry.ts`
+
+```ts
+if (shell && isHtmlRequest(request)) {
+  return new Response(shell, { headers: { "content-type": "text/html; charset=utf-8" }});
+}
+// otherwise, forward to the DO
+```
+
+Where:
+
+```ts
+function isHtmlRequest(request: Request): boolean {
+  if (request.method !== "GET") return false;
+  if (request.headers.get("upgrade")?.toLowerCase() === "websocket") return false;
+  return (request.headers.get("accept") ?? "").includes("text/html");
+}
+```
+
+Order matters: check `Upgrade: websocket` *before* `Accept` because some browsers set both on WS upgrade requests.
 
 ## Why `getAgentByName` and not raw `idFromName + get`
 

@@ -10,6 +10,7 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
   return {
     agentId: "chat",
     className: "ChatAgent",
+    baseClass: "Agent",
     folderPath: "chat",
     routePath: "/chat",
     binding: "CHAT_AGENT",
@@ -93,6 +94,32 @@ describe("generateWrangler", () => {
     const out = generateWrangler(mf([]), lockfile, { name: "app" });
     const cfg = parse(out);
     expect((cfg["durable_objects"] as any).bindings).toEqual([]);
+  });
+
+  test("hasApps false: no assets config emitted", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, {
+      name: "app",
+      hasApps: false,
+    });
+    const cfg = parse(out);
+    expect(cfg["assets"]).toBeUndefined();
+  });
+
+  test("hasApps true: assets config emitted pointing at ../assets", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, {
+      name: "app",
+      hasApps: true,
+    });
+    const cfg = parse(out);
+    expect(cfg["assets"]).toEqual({
+      directory: "../assets",
+      binding: "ASSETS",
+      not_found_handling: "none",
+      // The explicit "none" is load-bearing: the default auto-trailing-slash
+      // behavior redirects /foo/index.html → /foo/ which leaks into the
+      // browser URL and breaks useAgent's URL-derived instance lookup.
+      html_handling: "none",
+    });
   });
 });
 

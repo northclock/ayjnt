@@ -28,12 +28,12 @@
     "framework",
     "mcp"
   ],
-  "peerDependencies": {
-    "agents": "^0.10.2",
-    "wrangler": "^3 || ^4"
+  "dependencies": {
+    "agents": "0.10.2",
+    "wrangler": "4.82.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260414.1",
+    "@cloudflare/workers-types": "4.20260413.1",
     "@types/bun": "latest"
   },
   "engines": {

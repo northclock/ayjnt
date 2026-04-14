@@ -10,6 +10,7 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
   return {
     agentId: "chat",
     className: "ChatAgent",
+    baseClass: "Agent",
     folderPath: "chat",
     routePath: "/chat",
     binding: "CHAT_AGENT",
@@ -25,10 +26,13 @@ describe("generateEntry", () => {
     const out = generateEntry(mf([agent({})]), {
       outPath: "/fake/.ayjnt/dist/entry.ts",
     });
-    // Relative import from /fake/.ayjnt/dist to /fake/agents/chat/agent.ts
+    // Local import + re-export so we can both call static methods
+    // (ChatAgent.serve for MCP) AND have the class registered at the
+    // module boundary for DO class lookup.
     expect(out).toContain(
-      `export { default as ChatAgent } from "../../agents/chat/agent.ts";`,
+      `import ChatAgent from "../../agents/chat/agent.ts";`,
     );
+    expect(out).toContain(`export { ChatAgent };`);
     expect(out).toContain(`prefix: "/chat"`);
     expect(out).toContain(`binding: "CHAT_AGENT"`);
     expect(out).toContain("type Binding = \"CHAT_AGENT\"");
@@ -165,5 +169,63 @@ describe("generateEntry", () => {
     expect(out).toContain("if (match.middleware.length === 0) return finalize();");
     expect(out).toContain("return compose(match.middleware, c, finalize);");
     expect(out).toContain("createContext({");
+  });
+
+  test("no assetRoutes: every route has assetFlat: null and no ASSETS binding", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain("assetFlat: null");
+    expect(out).toContain("type Env = Record<Binding, DurableObjectNamespace>;");
+    expect(out).not.toContain("ASSETS: Fetcher");
+    // isHtmlRequest helper is always emitted so the code shape is stable
+    expect(out).toContain("function isHtmlRequest");
+  });
+
+  test("with assetRoutes: ASSETS added to Env, dispatch fetches index.html", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+      assetRoutes: { CHAT_AGENT: "chat" },
+    });
+    expect(out).toContain(`assetFlat: "chat"`);
+    expect(out).toContain("ASSETS: Fetcher");
+    expect(out).toContain("match.assetFlat && isHtmlRequest(request)");
+    expect(out).toContain("`/__ayjnt/${match.assetFlat}/index.html`");
+    expect(out).toContain("(env as any).ASSETS.fetch");
+  });
+
+  test("HTML detection checks method + upgrade + accept", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain(`if (request.method !== "GET") return false;`);
+    expect(out).toContain(`"upgrade"`);
+    expect(out).toContain(`accept.includes("text/html")`);
+  });
+
+  test("MCP agent: isMcp flag + McpAgent.serve dispatch", () => {
+    const out = generateEntry(
+      mf([agent({ className: "Tools", binding: "TOOLS", baseClass: "McpAgent" })]),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toMatch(/binding: "TOOLS".*isMcp: true/);
+    expect(out).toContain("if (match.isMcp)");
+    expect(out).toContain("ClassRef.serve(");
+    expect(out).toContain('"TOOLS": "/chat"'); // route prefix map
+  });
+
+  test("non-MCP agent: isMcp false in route table", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toMatch(/binding: "CHAT_AGENT".*isMcp: false/);
+  });
+
+  test("CLASSES map is emitted for MCP dispatch", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain('const CLASSES: Record<Binding, any>');
+    expect(out).toContain('"CHAT_AGENT": ChatAgent');
   });
 });
