@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-14T05:48:30.073Z",
+      "new_sqlite_classes": [
+        "ChatAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "chat": {
+      "agentId": "chat",
+      "className": "ChatAgent",
+      "firstTag": "v1"
+    }
+  }
+}

@@ -1,0 +1,112 @@
+import { describe, expect, test } from "bun:test";
+import type { AgentEntry, Manifest, MigrationLockfile } from "../core/types.ts";
+import { deriveWorkerName, generateWrangler } from "./wrangler.ts";
+
+function mf(agents: AgentEntry[]): Manifest {
+  return { root: "/fake", agents };
+}
+
+function agent(overrides: Partial<AgentEntry>): AgentEntry {
+  return {
+    agentId: "chat",
+    className: "ChatAgent",
+    folderPath: "chat",
+    routePath: "/chat",
+    binding: "CHAT_AGENT",
+    sourceFile: "/fake/agents/chat/agent.ts",
+    hasApp: false,
+    middlewareChain: [],
+    ...overrides,
+  };
+}
+
+function parse(s: string): Record<string, unknown> {
+  // strip leading comment line
+  const body = s.replace(/^\/\/[^\n]*\n/, "");
+  return JSON.parse(body);
+}
+
+describe("generateWrangler", () => {
+  const lockfile: MigrationLockfile = {
+    version: 1,
+    migrations: [
+      {
+        tag: "v1",
+        timestamp: "2026-04-14T00:00:00Z",
+        new_sqlite_classes: ["ChatAgent"],
+      },
+    ],
+    classes: { chat: { agentId: "chat", className: "ChatAgent", firstTag: "v1" } },
+  };
+
+  test("single agent emits binding + migration", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, {
+      name: "my-app",
+      compatibilityDate: "2026-04-14",
+    });
+    const cfg = parse(out);
+    expect(cfg["name"]).toBe("my-app");
+    expect(cfg["main"]).toBe("./entry.ts");
+    expect(cfg["compatibility_date"]).toBe("2026-04-14");
+    expect(cfg["compatibility_flags"]).toEqual(["nodejs_compat"]);
+    expect(cfg["durable_objects"]).toEqual({
+      bindings: [{ name: "CHAT_AGENT", class_name: "ChatAgent" }],
+    });
+    expect(cfg["migrations"]).toEqual([
+      {
+        tag: "v1",
+        timestamp: "2026-04-14T00:00:00Z",
+        new_sqlite_classes: ["ChatAgent"],
+      },
+    ]);
+  });
+
+  test("no duplicate nodejs_compat when user adds it", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, {
+      name: "x",
+      compatibilityFlags: ["nodejs_compat", "streams_enable_constructors"],
+    });
+    const cfg = parse(out);
+    expect(cfg["compatibility_flags"]).toEqual([
+      "nodejs_compat",
+      "streams_enable_constructors",
+    ]);
+  });
+
+  test("rejects invalid worker name", () => {
+    expect(() =>
+      generateWrangler(mf([]), lockfile, { name: "Not Valid!" }),
+    ).toThrow(/Invalid worker name/);
+  });
+
+  test("extras fields do not clobber generated fields", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, {
+      name: "app",
+      extras: { vars: { FOO: "bar" }, name: "should-be-ignored" },
+    });
+    const cfg = parse(out);
+    expect(cfg["vars"]).toEqual({ FOO: "bar" });
+    expect(cfg["name"]).toBe("app"); // generated fields override extras
+  });
+
+  test("empty manifest still produces valid config", () => {
+    const out = generateWrangler(mf([]), lockfile, { name: "app" });
+    const cfg = parse(out);
+    expect((cfg["durable_objects"] as any).bindings).toEqual([]);
+  });
+});
+
+describe("deriveWorkerName", () => {
+  test("strips scope", () => {
+    expect(deriveWorkerName("@acme/chat")).toBe("chat");
+  });
+  test("lowercases and hyphenates", () => {
+    expect(deriveWorkerName("My Cool App")).toBe("my-cool-app");
+  });
+  test("trims leading/trailing hyphens", () => {
+    expect(deriveWorkerName("!!foo!!")).toBe("foo");
+  });
+  test("already-valid passthrough", () => {
+    expect(deriveWorkerName("plain-app")).toBe("plain-app");
+  });
+});

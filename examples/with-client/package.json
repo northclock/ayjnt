@@ -1,0 +1,21 @@
+{
+  "name": "ayjnt-example-with-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ayjnt dev",
+    "build": "ayjnt build",
+    "deploy": "ayjnt deploy",
+    "migrate": "ayjnt migrate",
+    "client": "bun run client.ts"
+  },
+  "dependencies": {
+    "agents": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "ayjnt": "file:../..",
+    "wrangler": "^4"
+  }
+}

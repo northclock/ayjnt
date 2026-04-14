@@ -1,0 +1,20 @@
+{
+  "name": "ayjnt-example-basic",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ayjnt dev",
+    "build": "ayjnt build",
+    "deploy": "ayjnt deploy",
+    "migrate": "ayjnt migrate"
+  },
+  "dependencies": {
+    "agents": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "ayjnt": "file:../..",
+    "wrangler": "^4"
+  }
+}
