@@ -1,0 +1,6 @@
+node_modules
+.ayjnt/dist
+.ayjnt/manifest.json
+.wrangler
+.env
+.env.local

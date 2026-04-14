@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-14T06:50:16.563Z",
+      "new_sqlite_classes": [
+        "AdminUsersAgent",
+        "StatusAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "admin_users": {
+      "agentId": "admin_users",
+      "className": "AdminUsersAgent",
+      "firstTag": "v1"
+    },
+    "public_status": {
+      "agentId": "public_status",
+      "className": "StatusAgent",
+      "firstTag": "v1"
+    }
+  }
+}

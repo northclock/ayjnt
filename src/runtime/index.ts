@@ -1,10 +1,17 @@
 // Public runtime API — what user code imports via `import { ... } from "ayjnt"`.
 //
-// Kept intentionally thin: mostly re-exports from the Agents SDK so users have
-// a single import source, plus framework-specific helpers as they land.
+// Kept thin. Most framework work lives in codegen; this module is the small
+// surface of helpers user code calls directly.
 
-export const VERSION = "0.0.1";
+export const VERSION = "0.1.0";
 
-// Filled in as framework functionality lands:
-//   export { Agent, type Connection, type ConnectionContext } from "agents";
-//   export { defineConfig } from "./config.ts";
+// Re-export the Agent base class so `import { Agent } from "ayjnt"` works.
+// One import source means the user never has to remember whether a symbol
+// is "ours" or "Cloudflare's".
+export { Agent } from "agents";
+
+// Middleware types for user-authored middleware.ts files.
+export type { Context, Middleware, Next } from "./middleware.ts";
+
+// Typed inter-agent RPC.
+export { getAgent } from "./rpc.ts";

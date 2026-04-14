@@ -1,12 +1,43 @@
-// Typed inter-agent RPC — v0.2
+// Typed inter-agent RPC.
 //
-// User-facing API:
+// Thin wrapper over getAgentByName from the Agents SDK. The SDK's generic
+// parameter order is `<Env, T extends Agent<Env>>` which makes explicit
+// type args awkward at the call site — `getAgentByName<Env, ChatAgent>(...)`
+// forces the user to thread Env through just to specify the class.
 //
-//   import { getAgent } from "ayjnt/rpc";
-//   const chat = getAgent(env, "chat", userId);
-//   await chat.sendMessage("hello");   // fully typed, backed by DO stub
+// This wrapper inverts it: `getAgent<ChatAgent>(env.CHAT_AGENT, id)`. T is
+// the first (and only) generic the caller usually needs, inferred through
+// the namespace, and the return type is a typed stub with method autocomplete.
 //
-// Implementation uses the DO binding directly (env.CHAT_AGENT.get(id)) and
-// forwards method calls via a JSON-RPC-ish contract over stub.fetch. Types
-// come from a generated .d.ts that reflects the exported agent classes.
-export {};
+// Under the hood: idFromName → get → setName. The setName step keeps
+// `this.name` correct on the target DO so its CF_AGENT_IDENTITY messages
+// (and any code keying off `this.name`) look the same whether the agent
+// is called externally via HTTP or from another agent via getAgent.
+
+import { getAgentByName } from "agents";
+
+/**
+ * Fetch a typed DurableObject stub for an agent instance by name. The
+ * returned stub exposes every public method on T, plus .fetch() for raw
+ * HTTP-over-DO calls.
+ *
+ * @example
+ *   const chat = await getAgent<ChatAgent>(this.env.CHAT_AGENT, userId);
+ *   await chat.sendMessage("hello");
+ */
+export async function getAgent<
+  T extends Rpc.DurableObjectBranded | undefined,
+>(
+  namespace: DurableObjectNamespace<T>,
+  name: string,
+): Promise<DurableObjectStub<T>> {
+  // The SDK's typing constrains T to extend Agent<Env>. We deliberately
+  // loosen it to `Rpc.DurableObjectBranded` — the minimum shape the
+  // Workers DO runtime actually requires — so the call site reads cleanly
+  // as `getAgent<InventoryAgent>(ns, id)`. The runtime behavior is
+  // identical and TS still catches misuse via the namespace type.
+  return (await (getAgentByName as unknown as (
+    ns: DurableObjectNamespace<T>,
+    n: string,
+  ) => Promise<DurableObjectStub<T>>)(namespace, name));
+}

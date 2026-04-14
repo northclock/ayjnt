@@ -6,8 +6,8 @@ Reference projects that exercise the framework end-to-end. Each is a standalone 
 |---|---|---|
 | [`basic`](./basic) | v0.1 | One `ChatAgent`, no UI, no middleware. Smallest possible ayjnt project. |
 | [`with-client`](./with-client) | v0.1 | Connecting from the Agents client SDK using `basePath`. Explains the `path` vs `basePath` gotcha and the server-side `getAgentByName` requirement. |
-| *(planned)* `middleware` | v0.2 | Nested `middleware.ts`, route groups, auth. |
-| *(planned)* `inter-agent` | v0.2 | Multiple agents, `getAgent()` typed RPC. |
+| [`middleware`](./middleware) | v0.2 | Layered `middleware.ts` chain, route groups, short-circuiting vs wrapping, `c.set`/`c.get` per-request stash. |
+| [`inter-agent`](./inter-agent) | v0.2 | Two agents calling each other via `getAgent<T>()` typed RPC, with oversell protection showing exception propagation. |
 | *(planned)* `with-ui` | v0.3 | Co-located `app.tsx`, generated `useAgent()` hook. |
 | *(planned)* `mcp` | v0.4 | MCP App — `McpAgent` + UI for the iframe. |
 

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-14T06:53:16.852Z",
+      "new_sqlite_classes": [
+        "InventoryAgent",
+        "OrdersAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "inventory": {
+      "agentId": "inventory",
+      "className": "InventoryAgent",
+      "firstTag": "v1"
+    },
+    "orders": {
+      "agentId": "orders",
+      "className": "OrdersAgent",
+      "firstTag": "v1"
+    }
+  }
+}

@@ -29,7 +29,8 @@ describe("generateEntry", () => {
     expect(out).toContain(
       `export { default as ChatAgent } from "../../agents/chat/agent.ts";`,
     );
-    expect(out).toContain(`{ prefix: "/chat", binding: "CHAT_AGENT" }`);
+    expect(out).toContain(`prefix: "/chat"`);
+    expect(out).toContain(`binding: "CHAT_AGENT"`);
     expect(out).toContain("type Binding = \"CHAT_AGENT\"");
   });
 
@@ -92,7 +93,6 @@ describe("generateEntry", () => {
       ]),
       { outPath: "/fake/.ayjnt/dist/entry.ts" },
     );
-    // Union order follows agents array order (scan sorts alphabetically)
     expect(out).toContain(`type Binding = "A" | "B"`);
   });
 
@@ -103,5 +103,67 @@ describe("generateEntry", () => {
     expect(out).toContain("type Binding = never");
     expect(out).toContain("// (no agents discovered)");
     expect(out).toContain("export default");
+  });
+
+  test("no middleware: route table has empty middleware array", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain("middleware: []");
+    // compose is still imported — we always emit the same shape so the
+    // generated code stays predictable.
+    expect(out).toContain(`import { compose, createContext`);
+  });
+
+  test("middleware: imports deduped across agents, chained per route", () => {
+    const rootMw = "/fake/agents/middleware.ts";
+    const adminMw = "/fake/agents/admin/middleware.ts";
+    const out = generateEntry(
+      mf([
+        agent({
+          agentId: "chat",
+          className: "ChatAgent",
+          routePath: "/chat",
+          binding: "CHAT_AGENT",
+          folderPath: "chat",
+          sourceFile: "/fake/agents/chat/agent.ts",
+          middlewareChain: [rootMw],
+        }),
+        agent({
+          agentId: "admin_users",
+          className: "AdminUsersAgent",
+          routePath: "/admin/users",
+          binding: "ADMIN_USERS_AGENT",
+          folderPath: "admin/users",
+          sourceFile: "/fake/agents/admin/users/agent.ts",
+          middlewareChain: [rootMw, adminMw], // root + admin
+        }),
+      ]),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+
+    // Each unique middleware file imported exactly once, with stable index.
+    expect(out).toContain(`import mw_0 from "../../agents/middleware.ts"`);
+    expect(out).toContain(
+      `import mw_1 from "../../agents/admin/middleware.ts"`,
+    );
+
+    // /chat uses just the root
+    expect(out).toMatch(
+      /prefix: "\/chat", binding: "CHAT_AGENT", middleware: \[mw_0\]/,
+    );
+    // /admin/users chains root → admin
+    expect(out).toMatch(
+      /prefix: "\/admin\/users", binding: "ADMIN_USERS_AGENT", middleware: \[mw_0, mw_1\]/,
+    );
+  });
+
+  test("dispatch runs middleware via compose before calling finalize", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain("if (match.middleware.length === 0) return finalize();");
+    expect(out).toContain("return compose(match.middleware, c, finalize);");
+    expect(out).toContain("createContext({");
   });
 });
