@@ -3,23 +3,41 @@
   "version": "0.1.0",
   "description": "Agent-first framework for Cloudflare. No worker boilerplate, no wrangler wrestling.",
   "type": "module",
-  "module": "src/runtime/index.ts",
   "bin": {
-    "ayjnt": "./bin/ayjnt.ts"
+    "ayjnt": "./dist/ayjnt.js"
   },
   "exports": {
-    ".": "./src/runtime/index.ts",
-    "./rpc": "./src/runtime/rpc.ts",
-    "./middleware": "./src/runtime/middleware.ts"
+    ".": {
+      "bun": "./src/runtime/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./rpc": {
+      "bun": "./src/runtime/rpc.ts",
+      "types": "./dist/rpc.d.ts",
+      "import": "./dist/rpc.js",
+      "default": "./dist/rpc.js"
+    },
+    "./middleware": {
+      "bun": "./src/runtime/middleware.ts",
+      "types": "./dist/middleware.d.ts",
+      "import": "./dist/middleware.js",
+      "default": "./dist/middleware.js"
+    }
   },
   "files": [
     "src",
-    "bin",
+    "dist",
     "README.md"
   ],
   "scripts": {
     "ayjnt": "bun run bin/ayjnt.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bunup && bun scripts/postbuild.ts",
+    "prepublishOnly": "bun run test && bun run build",
+    "publish:dry": "bun publish --dry-run",
+    "release": "bun publish"
   },
   "keywords": [
     "cloudflare",
@@ -34,7 +52,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260413.1",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "bunup": "^0.16.31"
   },
   "engines": {
     "bun": ">=1.1.0"
