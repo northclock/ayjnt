@@ -1,0 +1,339 @@
+import { DocPageShell } from "@/components/DocPageShell";
+import { Callout } from "@/components/Callout";
+import { CodeBlock } from "@/components/CodeBlock";
+
+export const metadata = {
+	title: "Co-located React UI — ayjnt docs",
+	description:
+		"Drop app.tsx next to agent.ts and you get a bundled React app wired to a typed useAgent hook. How it's bundled, how it's served, and how state syncs.",
+};
+
+export default function Page() {
+	return (
+		<DocPageShell
+			slug="guides/co-located-ui"
+			lede="Write a React component in app.tsx next to your agent. ayjnt bundles it, serves it on the same URL as the agent, and generates a typed useAgent hook so state syncs automatically across every connected tab."
+		>
+			<h2>The one-file setup</h2>
+			<p>
+				If <code>agents/counter/agent.ts</code> exists and you add{" "}
+				<code>agents/counter/app.tsx</code> next to it, the next{" "}
+				<code>ayjnt build</code> will:
+			</p>
+			<ol>
+				<li>
+					Generate a typed <code>useAgent</code> hook at{" "}
+					<code>.ayjnt/client/counter/index.tsx</code>.
+				</li>
+				<li>
+					Bundle <code>app.tsx</code> with Bun, output to{" "}
+					<code>.ayjnt/assets/__ayjnt/counter/app.js</code>.
+				</li>
+				<li>
+					Write an HTML shell at{" "}
+					<code>.ayjnt/assets/__ayjnt/counter/index.html</code> that
+					references the bundled JS.
+				</li>
+				<li>
+					Add the <code>assets</code> binding to the generated{" "}
+					<code>wrangler.jsonc</code> so Cloudflare serves the assets.
+				</li>
+				<li>
+					Generate worker-side dispatch that serves the HTML shell when a
+					browser navigates to <code>/counter/room-1</code>.
+				</li>
+			</ol>
+
+			<h2>The agent and the UI</h2>
+			<p>This is a complete working pair (from <code>examples/with-ui</code>):</p>
+			<CodeBlock
+				filename="agents/counter/agent.ts"
+				lang="ts"
+				code={`import { Agent } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type State = { count: number };
+
+export default class CounterAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = { count: 0 };
+
+  override async onRequest(): Promise<Response> {
+    return Response.json({ instance: this.name, ...this.state });
+  }
+}`}
+			/>
+			<CodeBlock
+				filename="agents/counter/app.tsx"
+				lang="tsx"
+				code={`import { createRoot } from "react-dom/client";
+import { useAgent } from "@ayjnt/counter";
+
+function Counter() {
+  const agent = useAgent();
+  const count = agent.state?.count ?? 0;
+  const set = (next: number) => agent.setState({ count: next });
+
+  return (
+    <main>
+      <h1>Count: {count}</h1>
+      <p>instance: <code>{agent.name}</code></p>
+      <button onClick={() => set(count - 1)}>−</button>
+      <button onClick={() => set(0)}>reset</button>
+      <button onClick={() => set(count + 1)}>+</button>
+    </main>
+  );
+}
+
+const root = document.getElementById("root");
+if (root) createRoot(root).render(<Counter />);`}
+				highlightLines={[2, 5, 7]}
+			/>
+
+			<p>
+				<code>useAgent()</code> from <code>@ayjnt/counter</code> is the
+				typed hook ayjnt generated for this folder. No arguments —{" "}
+				<code>basePath</code> is derived from the current URL. The returned{" "}
+				<code>agent</code> has state synced from the DO (which arrives via
+				WebSocket after connect) and <code>setState</code> that round-trips
+				to the server.
+			</p>
+
+			<h2>Required tsconfig setup</h2>
+			<p>
+				The path alias <code>@ayjnt/counter</code> resolves via tsconfig.
+				The <code>ayjnt new --with-ui</code> template configures it; if
+				you&apos;re adding a UI to an existing project, add this to your{" "}
+				<code>tsconfig.json</code>:
+			</p>
+			<CodeBlock
+				filename="tsconfig.json"
+				lang="jsonc"
+				code={`{
+  "compilerOptions": {
+    "paths": {
+      "@ayjnt/env": ["./.ayjnt/env.d.ts"],
+      "@ayjnt/*": ["./.ayjnt/client/*"]
+    }
+  }
+}`}
+				highlightLines={[4, 5]}
+			/>
+			<Callout kind="warn" title="Leading ./ is required">
+				<p>
+					TypeScript rejects path mappings without <code>baseUrl</code>{" "}
+					unless they&apos;re relative. <code>.ayjnt/env.d.ts</code>{" "}
+					without the <code>./</code> prefix will fail with{" "}
+					<code>TS5090: Non-relative paths are not allowed when &apos;baseUrl&apos;
+					is not set.</code>
+				</p>
+				<p>
+					If you&apos;d rather not inline the paths: add{" "}
+					<code>&quot;extends&quot;: &quot;./.ayjnt/tsconfig.json&quot;</code>{" "}
+					to your tsconfig. ayjnt regenerates that file on every build with
+					the correct mappings. Works only after a first build, since the
+					file has to exist before TypeScript can read it.
+				</p>
+			</Callout>
+
+			<h2>What the generated hook looks like</h2>
+			<p>
+				For debugging, here&apos;s the (slightly abbreviated) code ayjnt
+				generates at <code>.ayjnt/client/counter/index.tsx</code>:
+			</p>
+			<CodeBlock
+				filename=".ayjnt/client/counter/index.tsx (generated)"
+				lang="tsx"
+				code={`import {
+  useAgent as useAgentUpstream,
+  type UseAgentOptions,
+} from "agents/react";
+import type CounterAgent from "../../../agents/counter/agent.ts";
+
+export type { default as CounterAgent } from "../../../agents/counter/agent.ts";
+
+type Instance = InstanceType<typeof CounterAgent>;
+type DefaultState = Instance extends { state: infer S } ? S : unknown;
+
+export function useAgent<State = DefaultState>(
+  options?: Omit<UseAgentOptions<State>, "agent" | "basePath"> & {
+    name?: string;
+  },
+): ReturnType<typeof useAgentUpstream<State>> {
+  const { name: overrideName, ...rest } = options ?? {};
+  const instanceName = overrideName ?? deriveInstance();
+  return useAgentUpstream<State>({
+    agent: "CounterAgent",
+    basePath: "counter" + "/" + instanceName,
+    ...rest,
+  });
+}
+
+function deriveInstance(): string {
+  if (typeof window === "undefined") return "default";
+  const prefix = "/counter";
+  const p = window.location.pathname;
+  if (p !== prefix && !p.startsWith(prefix + "/")) return "default";
+  const remainder = p.slice(prefix.length);
+  const parts = remainder.split("/").filter(Boolean);
+  return parts[0] ?? "default";
+}`}
+			/>
+			<p>The hook:</p>
+			<ul>
+				<li>
+					Derives the instance name from the URL — <code>/counter/room-1</code>{" "}
+					→ <code>&quot;room-1&quot;</code> — or falls back to{" "}
+					<code>&quot;default&quot;</code> if the URL doesn&apos;t match.
+				</li>
+				<li>
+					Uses <code>basePath</code> (not <code>path</code>) so ayjnt&apos;s
+					URL shape is preserved. See{" "}
+					<a
+						href="/docs/guides/client-integration"
+						className="link-underline"
+					>
+						Client integration
+					</a>{" "}
+					for why.
+				</li>
+				<li>
+					Types the default <code>State</code> as{" "}
+					<code>InstanceType&lt;typeof CounterAgent&gt;[&quot;state&quot;]</code>{" "}
+					— so <code>agent.state</code> is typed to your actual state shape.
+				</li>
+			</ul>
+
+			<h2>HTML vs agent on the same URL</h2>
+			<p>
+				The worker serves three different responses from{" "}
+				<code>/counter/room-1</code> depending on what the request looks
+				like:
+			</p>
+			<table>
+				<thead>
+					<tr>
+						<th>Request</th>
+						<th>Response</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>
+							Browser navigation (<code>GET</code> + <code>Accept: text/html</code>)
+						</td>
+						<td>HTML shell from Assets binding</td>
+					</tr>
+					<tr>
+						<td>
+							<code>useAgent</code> handshake (<code>Upgrade: websocket</code>)
+						</td>
+						<td>WebSocket upgrade → agent</td>
+					</tr>
+					<tr>
+						<td>
+							<code>curl</code> or <code>fetch</code> with no <code>Accept: text/html</code>
+						</td>
+						<td>Agent&apos;s <code>onRequest</code></td>
+					</tr>
+				</tbody>
+			</table>
+
+			<h2>Live state sync across tabs</h2>
+			<p>
+				Open <code>/counter/room-1</code> in two browser tabs. Click{" "}
+				<code>+</code> in one. The counter updates in the other immediately.
+				This is handled entirely by the SDK — the DO broadcasts a{" "}
+				<code>CF_AGENT_STATE</code> message to every connected client every
+				time <code>setState</code> is called (server-side <em>or</em>{" "}
+				client-side).
+			</p>
+			<p>
+				The counter example intentionally doesn&apos;t expose any methods —
+				everything goes through <code>agent.setState</code> from the client.
+				For richer APIs (place order, cancel, redeem) you&apos;ll want
+				dedicated agent methods; see{" "}
+				<a href="/docs/guides/inter-agent-rpc" className="link-underline">
+					Inter-agent RPC
+				</a>
+				.
+			</p>
+
+			<h2>How the bundling works</h2>
+			<ul>
+				<li>
+					<code>Bun.build</code> runs with <code>target: &quot;browser&quot;</code>{" "}
+					on every <code>app.tsx</code>. React, <code>react-dom</code>,{" "}
+					<code>agents/react</code>, and the generated hook all get bundled
+					in.
+				</li>
+				<li>
+					Output is written as <code>app.js</code> under{" "}
+					<code>.ayjnt/assets/__ayjnt/&lt;route&gt;/</code>.
+				</li>
+				<li>
+					The HTML shell references the bundle via{" "}
+					<code>&lt;script type=&quot;module&quot; src=&quot;/__ayjnt/counter/app.js&quot;&gt;</code>.
+				</li>
+				<li>
+					Cloudflare Assets serves both files. The worker is only involved
+					for the initial HTML fetch (where it proxies to the asset); the
+					JS bundle is served directly from Cloudflare&apos;s edge.
+				</li>
+			</ul>
+
+			<Callout kind="note" title="html_handling: 'none'">
+				<p>
+					The generated wrangler config sets{" "}
+					<code>html_handling: &quot;none&quot;</code> on the Assets binding.
+					This isn&apos;t cosmetic — it&apos;s a bug fix.
+				</p>
+				<p>
+					Cloudflare Assets defaults to <code>auto-trailing-slash</code>,
+					which redirects <code>/foo/index.html</code> to{" "}
+					<code>/foo/</code>. That redirect would leak into the browser URL
+					bar, and the <code>useAgent</code> hook — which reads{" "}
+					<code>window.location.pathname</code> to derive the instance —
+					would see the wrong URL and fall back to{" "}
+					<code>&quot;default&quot;</code>. Every user would end up on the
+					same instance regardless of which URL they visited.
+				</p>
+				<p>
+					<code>html_handling: &quot;none&quot;</code> disables the
+					rewrite. The browser URL stays at the user&apos;s original path
+					and the instance is derived correctly.
+				</p>
+			</Callout>
+
+			<h2>Adding react and react-dom</h2>
+			<p>
+				React isn&apos;t a transitive dependency of ayjnt — you bring it
+				yourself. <code>ayjnt new --with-ui</code> adds these; for an
+				existing project:
+			</p>
+			<CodeBlock
+				lang="sh"
+				code={`bun add react react-dom
+bun add -d @types/react @types/react-dom`}
+			/>
+			<p>
+				Also add <code>DOM</code> and <code>DOM.Iterable</code> to your{" "}
+				<code>tsconfig.json</code>&apos;s <code>lib</code> array so browser
+				types are available in the <code>app.tsx</code> file.
+			</p>
+
+			<h2>Bundle size</h2>
+			<p>
+				A typical <code>app.tsx</code> bundle is 150–450 KB after gzip —
+				mostly React. This is inlined into Cloudflare Workers Assets, which
+				has a 25 MB limit per asset file. In practice you&apos;ll never hit
+				that; if you do, code-splitting via dynamic imports works.
+			</p>
+			<p>
+				If you want to share React across multiple{" "}
+				<code>app.tsx</code> files (one React copy per bundle is wasteful),
+				the current workaround is to keep the UI in one place and have
+				other agents link to it. A shared-chunk story is on the roadmap.
+			</p>
+		</DocPageShell>
+	);
+}

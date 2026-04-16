@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@cloudflare/workers-types": "4.20260413.1",
-    "ayjnt": "file:../..",
+    "ayjnt": "0.1.0",
     "wrangler": "4.82.1"
   }
 }

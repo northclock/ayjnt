@@ -18,7 +18,7 @@
     "@types/bun": "latest",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "ayjnt": "file:../..",
+    "ayjnt": "0.1.0",
     "wrangler": "4.82.1"
   }
 }

@@ -1,0 +1,39 @@
+import type { ReactNode } from "react";
+
+/**
+ * Typography wrapper for long-form docs pages. Owns the margin/line-
+ * height/spacing story for headings, paragraphs, lists, and inline
+ * code so individual pages can write plain JSX without thinking about
+ * vertical rhythm. Shiki-rendered CodeBlocks and our own Callouts
+ * live inside this container and already manage their own outer
+ * spacing via explicit margins.
+ */
+export function Prose({ children }: { children: ReactNode }) {
+	return (
+		<div
+			className="prose-body max-w-none
+			text-[15.5px] leading-[1.72] text-[var(--ink)]
+			[&>p]:my-4
+			[&>p]:text-[var(--ink-soft)]
+			[&>h2]:mt-12 [&>h2]:mb-4 [&>h2]:font-sans [&>h2]:text-[26px] [&>h2]:font-semibold [&>h2]:leading-tight [&>h2]:tracking-tight [&>h2]:text-[var(--ink)]
+			[&>h2]:border-b [&>h2]:border-[var(--rule-strong)] [&>h2]:pb-2
+			[&>h3]:mt-10 [&>h3]:mb-3 [&>h3]:font-sans [&>h3]:text-[19px] [&>h3]:font-semibold [&>h3]:tracking-tight [&>h3]:text-[var(--ink)]
+			[&>h4]:mt-8 [&>h4]:mb-2 [&>h4]:font-mono [&>h4]:text-[12px] [&>h4]:font-semibold [&>h4]:uppercase [&>h4]:tracking-widest [&>h4]:text-[var(--ink-muted)]
+			[&>ul]:my-4 [&>ul]:ml-0 [&>ul]:flex [&>ul]:flex-col [&>ul]:gap-2
+			[&>ul>li]:relative [&>ul>li]:pl-5 [&>ul>li]:text-[var(--ink-soft)]
+			[&>ul>li]:before:absolute [&>ul>li]:before:left-0 [&>ul>li]:before:top-[0.7em] [&>ul>li]:before:h-1 [&>ul>li]:before:w-1 [&>ul>li]:before:bg-[var(--amber)]
+			[&>ol]:my-4 [&>ol]:ml-0 [&>ol]:flex [&>ol]:flex-col [&>ol]:gap-2 [&>ol]:[counter-reset:ol]
+			[&>ol>li]:relative [&>ol>li]:pl-8 [&>ol>li]:text-[var(--ink-soft)] [&>ol>li]:[counter-increment:ol]
+			[&>ol>li]:before:absolute [&>ol>li]:before:left-0 [&>ol>li]:before:top-[0.1em] [&>ol>li]:before:content-[counter(ol,decimal-leading-zero)] [&>ol>li]:before:font-mono [&>ol>li]:before:text-[11px] [&>ol>li]:before:font-semibold [&>ol>li]:before:uppercase [&>ol>li]:before:tracking-widest [&>ol>li]:before:text-[var(--amber)]
+			[&_code]:font-mono [&_code]:text-[0.88em] [&_code]:bg-[var(--paper-edge)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:border [&_code]:border-[var(--rule-strong)]
+			[&_a:not(.link-underline):not(.no-prose)]:text-[var(--ink)] [&_a:not(.link-underline):not(.no-prose)]:underline [&_a:not(.link-underline):not(.no-prose)]:decoration-[var(--amber)] [&_a:not(.link-underline):not(.no-prose)]:decoration-2 [&_a:not(.link-underline):not(.no-prose)]:underline-offset-4
+			[&>blockquote]:my-6 [&>blockquote]:border-l-4 [&>blockquote]:border-[var(--amber)] [&>blockquote]:bg-[var(--paper-edge)] [&>blockquote]:px-4 [&>blockquote]:py-3 [&>blockquote]:italic
+			[&_table]:w-full [&_table]:my-6 [&_table]:border [&_table]:border-[var(--ink)] [&_table]:text-[14px]
+			[&_thead]:bg-[var(--paper-edge)] [&_thead>tr>th]:border-b [&_thead>tr>th]:border-[var(--ink)] [&_thead>tr>th]:px-3 [&_thead>tr>th]:py-2 [&_thead>tr>th]:text-left [&_thead>tr>th]:font-mono [&_thead>tr>th]:text-[11px] [&_thead>tr>th]:uppercase [&_thead>tr>th]:tracking-widest [&_thead>tr>th]:text-[var(--ink-muted)]
+			[&_tbody>tr>td]:border-b [&_tbody>tr>td]:border-[var(--rule-strong)] [&_tbody>tr>td]:px-3 [&_tbody>tr>td]:py-2.5 [&_tbody>tr>td]:align-top
+			"
+		>
+			{children}
+		</div>
+	);
+}

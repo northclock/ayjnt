@@ -1,0 +1,10 @@
+node_modules
+
+# ayjnt generated artifacts. Only .ayjnt/migrations.json is committed —
+# everything else regenerates on every `ayjnt build`.
+.ayjnt/*
+!.ayjnt/migrations.json
+
+.wrangler
+.env
+.env.local

@@ -1,0 +1,21 @@
+{
+  "name": "ayjnt-example-agentic-rag",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ayjnt dev",
+    "build": "ayjnt build",
+    "deploy": "ayjnt deploy",
+    "migrate": "ayjnt migrate",
+    "client": "bun run client.ts"
+  },
+  "dependencies": {
+    "agents": "0.10.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "ayjnt": "0.1.0",
+    "wrangler": "4.82.1"
+  }
+}

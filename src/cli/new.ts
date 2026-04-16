@@ -1,7 +1,12 @@
-// ayjnt new — scaffold a new project with an example agent.
+// ayjnt new — scaffold a new project with a starter agent.
 //
-//   ayjnt new my-app              → minimal agent (one ChatAgent, no UI)
+//   ayjnt new my-app              → blank starter (one "alive" agent, no UI)
 //   ayjnt new my-app --with-ui    → counter agent with co-located app.tsx
+//
+// The default ("blank") is deliberately the smallest thing that proves the
+// pipeline works: one agent that responds "I'm alive" to any request. Every
+// example in /examples assumes you start from this scaffold, then replace
+// the alive/ folder with whatever the example demonstrates.
 //
 // Inlines all template files as string constants so we don't need to ship
 // a templates/ directory on npm (and worry about file path resolution
@@ -17,7 +22,8 @@ Scaffold a new ayjnt project.
 
 Options:
   --with-ui         Include a React UI using the co-located app.tsx pattern.
-                    Without this flag, scaffolds a minimal agent only.
+                    Without this flag, scaffolds a blank starter project
+                    with a single "I'm alive" agent.
   -h, --help        Show this help.
 
 Next steps after scaffolding:
@@ -26,7 +32,7 @@ Next steps after scaffolding:
   bun run dev
 `;
 
-type Template = "minimal" | "with-ui";
+type Template = "blank" | "with-ui";
 
 export async function newCmd(argv: string[]): Promise<void> {
   if (argv.length === 0 || argv.includes("-h") || argv.includes("--help")) {
@@ -35,7 +41,9 @@ export async function newCmd(argv: string[]): Promise<void> {
   }
 
   const withUi = argv.includes("--with-ui");
-  const positional = argv.filter((a) => !a.startsWith("--") && !a.startsWith("-"));
+  const positional = argv.filter(
+    (a) => !a.startsWith("--") && !a.startsWith("-"),
+  );
   const targetDir = positional[0];
 
   if (!targetDir) {
@@ -51,7 +59,7 @@ export async function newCmd(argv: string[]): Promise<void> {
     );
   }
 
-  const template: Template = withUi ? "with-ui" : "minimal";
+  const template: Template = withUi ? "with-ui" : "blank";
   const projectName = sanitizePackageName(path.basename(target));
 
   await scaffold(target, projectName, template);
@@ -63,6 +71,9 @@ export async function newCmd(argv: string[]): Promise<void> {
   if (template === "with-ui") {
     console.log(`  then open http://localhost:8787/counter/demo in a browser`);
     console.log(`  (open two tabs to see state sync)\n`);
+  } else {
+    console.log(`  then curl http://localhost:8787/alive/hello`);
+    console.log(`  → { "status": "alive", "instance": "hello" }\n`);
   }
 }
 
@@ -80,13 +91,16 @@ async function scaffold(
   );
   await Bun.write(path.join(target, "tsconfig.json"), tsconfig(template));
   await Bun.write(path.join(target, ".gitignore"), gitignore());
-  await Bun.write(path.join(target, "README.md"), readme(projectName, template));
+  await Bun.write(
+    path.join(target, "README.md"),
+    readme(projectName, template),
+  );
 
-  if (template === "minimal") {
-    mkdirSync(path.join(target, "agents", "chat"), { recursive: true });
+  if (template === "blank") {
+    mkdirSync(path.join(target, "agents", "alive"), { recursive: true });
     await Bun.write(
-      path.join(target, "agents", "chat", "agent.ts"),
-      minimalAgent(),
+      path.join(target, "agents", "alive", "agent.ts"),
+      blankAgent(),
     );
   } else {
     mkdirSync(path.join(target, "agents", "counter"), { recursive: true });
@@ -102,7 +116,10 @@ async function scaffold(
 }
 
 function sanitizePackageName(name: string): string {
-  const cleaned = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  const cleaned = name
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   return cleaned || "ayjnt-app";
 }
 
@@ -145,7 +162,10 @@ function packageJson(name: string, template: Template): string {
 
 function tsconfig(template: Template): string {
   const compilerOptions: Record<string, unknown> = {
-    lib: template === "with-ui" ? ["ESNext", "DOM", "DOM.Iterable"] : ["ESNext"],
+    lib:
+      template === "with-ui"
+        ? ["ESNext", "DOM", "DOM.Iterable"]
+        : ["ESNext"],
     target: "ESNext",
     module: "Preserve",
     moduleDetection: "force",
@@ -189,6 +209,7 @@ dist
 .env
 .env.local
 .env.*.local
+.dev.vars
 
 # editor
 .vscode
@@ -208,35 +229,45 @@ Open http://localhost:8787/counter/demo in two browser tabs — the \`+\` button
 
 Each path segment after \`/counter/\` is a separate Durable Object instance with its own state: \`/counter/room-1\` and \`/counter/room-2\` are independent.
 `
-      : `## Your first agent
+      : `## Your blank starter
 
-\`agents/chat/agent.ts\` is a minimal ChatAgent. Each path segment after \`/chat/\` is a separate Durable Object instance with its own state.
+\`agents/alive/agent.ts\` is a minimal agent that responds with \`{ "status": "alive", "instance": "<id>" }\` to any request. It exists to prove the pipeline works before you replace it with something interesting.
 
 Try:
 
 \`\`\`sh
-curl -X POST http://localhost:8787/chat/room-1 -H "content-type: application/json" -d '{"text":"hello"}'
-curl http://localhost:8787/chat/room-1
+curl http://localhost:8787/alive/hello
+curl http://localhost:8787/alive/world
 \`\`\`
+
+Each path segment after \`/alive/\` is a separate Durable Object instance.
+
+## Adding your own agent
+
+1. \`rm -rf agents/alive\` (or leave it — you can have as many agents as you want)
+2. \`mkdir agents/<your-agent>\` and drop an \`agent.ts\` in it
+3. Default-export a class that extends \`Agent\`
+
+That's it. Run \`bun run dev\` and your new agent is reachable at \`/<your-agent>/:instance-id\`.
 
 ## Adding a UI
 
 Drop an \`app.tsx\` next to \`agent.ts\`:
 
 \`\`\`tsx
-// agents/chat/app.tsx
+// agents/alive/app.tsx
 import { createRoot } from "react-dom/client";
-import { useAgent } from "@ayjnt/chat";
+import { useAgent } from "@ayjnt/alive";
 
-function Chat() {
+function App() {
   const agent = useAgent();
-  return <div>{JSON.stringify(agent.state)}</div>;
+  return <div>agent {agent.name}: {JSON.stringify(agent.state)}</div>;
 }
 
-createRoot(document.getElementById("root")!).render(<Chat />);
+createRoot(document.getElementById("root")!).render(<App />);
 \`\`\`
 
-Add \`react\`, \`react-dom\`, and their types to your \`package.json\`, run \`bun install\`, then \`bun run dev\`. Visit http://localhost:8787/chat/room-1 in a browser.
+Add \`react\`, \`react-dom\`, and their types to \`package.json\`, run \`bun install\`, then \`bun run dev\`. Visit http://localhost:8787/alive/hello in a browser.
 `;
   return `# ${name}
 
@@ -261,24 +292,31 @@ ${body}
 `;
 }
 
-function minimalAgent(): string {
+/**
+ * The blank starter: one agent that returns "I'm alive" on every request.
+ * Intentionally empty state, no methods — just the minimum needed to prove
+ * routing, DO binding, and state wiring all work. Every example in /examples
+ * starts from this scaffold and replaces agents/alive with its own agents.
+ */
+function blankAgent(): string {
   return `import { Agent } from "agents";
 import type { GeneratedEnv } from "@ayjnt/env";
 
-type State = { messages: { role: "user" | "assistant"; text: string }[] };
-
-export default class ChatAgent extends Agent<GeneratedEnv, State> {
-  override initialState: State = { messages: [] };
-
-  override async onRequest(request: Request): Promise<Response> {
-    if (request.method === "POST") {
-      const { text } = (await request.json()) as { text: string };
-      this.setState({
-        messages: [...this.state.messages, { role: "user", text }],
-      });
-      return Response.json({ ok: true, count: this.state.messages.length });
-    }
-    return Response.json({ instance: this.name, ...this.state });
+/**
+ * Blank starter agent. Responds with "I'm alive" to any request on any
+ * instance id (\`/alive/hello\`, \`/alive/anything\`, etc.).
+ *
+ * Each path segment after \`/alive/\` is a separate Durable Object instance
+ * with isolated state. For now that state is empty — delete this agent and
+ * drop your own under agents/ when you're ready.
+ */
+export default class AliveAgent extends Agent<GeneratedEnv> {
+  override async onRequest(_request: Request): Promise<Response> {
+    return Response.json({
+      status: "alive",
+      message: "I'm alive",
+      instance: this.name,
+    });
   }
 }
 `;

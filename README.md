@@ -20,22 +20,24 @@ ayjnt dev       # local worker
 ayjnt deploy    # ship it
 ```
 
-**v0.4 — `ayjnt new` bootstrap and MCP agent support.** Scaffold a fresh project with one command (minimal or with-ui template), and agents extending `McpAgent` route through the Agents SDK's `.serve()` handler automatically so tool-calling LLM integrations work with zero extra wiring.
+**v0.4 — `ayjnt new` bootstrap and MCP agent support.** Scaffold a fresh project with one command (blank starter or with-ui template), and agents extending `McpAgent` route through the Agents SDK's `.serve()` handler automatically so tool-calling LLM integrations work with zero extra wiring.
 
 ## Quickstart
 
 ```sh
-bunx ayjnt new my-app          # minimal template (one agent, no UI)
-bunx ayjnt new my-app --with-ui   # with a React UI bound to the agent
+bunx ayjnt new my-app             # blank starter — one "I'm alive" agent
+bunx ayjnt new my-app --with-ui   # same, plus React preinstalled
 
 cd my-app
 bun install
 bun run dev
-# POST http://localhost:8787/chat/<any-id>    (minimal)
+# curl http://localhost:8787/alive/hello      (blank)
 # open http://localhost:8787/counter/demo     (with-ui)
 ```
 
-See [`examples/basic`](./examples/basic) for the smallest hand-written project, or [`examples/with-ui`](./examples/with-ui) for the UI version.
+The blank starter gives you a single agent at `/alive/:instance-id` that responds `{"status":"alive","message":"I'm alive"}` — the minimum that proves routing, DO binding, and state wiring all work. Every example in `/examples` starts from this scaffold and replaces `agents/alive` with its own agents.
+
+Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
 
 ## File conventions
 

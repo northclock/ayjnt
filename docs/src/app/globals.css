@@ -1,0 +1,215 @@
+@import "tailwindcss";
+
+/* --- ayjnt: tech grid paper theme ------------------------------------- */
+/* The palette is warm off-white with a crisp black rule, slight amber
+ * accent for focal points, and grid lines precise enough to draft on.
+ * The idea: "engineering notebook that was just opened." */
+
+:root {
+	--paper: #fbfaf5;
+	--paper-edge: #f4f2e9;
+	--ink: #0b0b0a;
+	--ink-soft: #3b3a36;
+	--ink-muted: #6b6a63;
+	--rule: #e4e1d2;
+	--rule-strong: #c8c3ac;
+	--amber: #d97706;
+	--amber-glow: rgba(217, 119, 6, 0.12);
+	--blue: #1d4ed8;
+
+	--grid-minor: 16px;
+	--grid-major: 96px;
+
+	color-scheme: light;
+}
+
+@theme inline {
+	--color-background: var(--paper);
+	--color-foreground: var(--ink);
+	--color-muted: var(--ink-muted);
+	--color-rule: var(--rule);
+	--color-accent: var(--amber);
+	--color-info: var(--blue);
+	--font-sans: var(--font-geist-sans);
+	--font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--paper: #0a0a09;
+		--paper-edge: #101010;
+		--ink: #f0ede3;
+		--ink-soft: #d6d3c6;
+		--ink-muted: #8a887f;
+		--rule: #1e1d1a;
+		--rule-strong: #2c2a25;
+		--amber: #f59e0b;
+		--amber-glow: rgba(245, 158, 11, 0.18);
+		--blue: #60a5fa;
+		color-scheme: dark;
+	}
+}
+
+html {
+	font-feature-settings: "ss01", "cv11";
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+}
+
+body {
+	background: var(--paper);
+	color: var(--ink);
+	font-family: var(--font-sans, system-ui, sans-serif);
+	min-height: 100vh;
+}
+
+/* Grid paper background. Two layers: a 16px minor grid and a 96px major
+ * grid. Kept subtle so text reads cleanly over it. */
+.grid-paper {
+	background-image:
+		linear-gradient(to right, var(--rule) 1px, transparent 1px),
+		linear-gradient(to bottom, var(--rule) 1px, transparent 1px),
+		linear-gradient(to right, var(--rule-strong) 1px, transparent 1px),
+		linear-gradient(to bottom, var(--rule-strong) 1px, transparent 1px);
+	background-size:
+		var(--grid-minor) var(--grid-minor),
+		var(--grid-minor) var(--grid-minor),
+		var(--grid-major) var(--grid-major),
+		var(--grid-major) var(--grid-major);
+	background-position: -1px -1px;
+}
+
+.grid-paper-dots {
+	background-image: radial-gradient(
+		var(--rule-strong) 1px,
+		transparent 1px
+	);
+	background-size: var(--grid-minor) var(--grid-minor);
+}
+
+/* Reusable card surface: white-ish paper, crisp border, soft shadow.
+ * The "engineering diagram" block. */
+.card {
+	background: color-mix(in srgb, var(--paper) 85%, white 15%);
+	border: 1px solid var(--ink);
+	box-shadow: 3px 3px 0 var(--ink);
+	transition: box-shadow 150ms ease, transform 150ms ease;
+}
+@media (prefers-color-scheme: dark) {
+	.card {
+		background: color-mix(in srgb, var(--paper) 70%, black 30%);
+	}
+}
+.card-interactive:hover {
+	transform: translate(-1px, -1px);
+	box-shadow: 4px 4px 0 var(--ink);
+}
+
+.card-accent {
+	background: var(--paper);
+	border: 1px solid var(--amber);
+	box-shadow: 3px 3px 0 var(--amber);
+}
+
+/* Amber-underlined link, like a hand-drawn marker. */
+.link-underline {
+	position: relative;
+	color: inherit;
+	text-decoration: none;
+}
+.link-underline::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: -2px;
+	height: 2px;
+	background: var(--amber);
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform 200ms ease;
+}
+.link-underline:hover::after {
+	transform: scaleX(1);
+}
+
+/* Monospace tag pill. */
+.tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.125rem 0.5rem;
+	font-family: var(--font-mono, monospace);
+	font-size: 0.75rem;
+	line-height: 1.2;
+	color: var(--ink-soft);
+	background: var(--paper-edge);
+	border: 1px solid var(--rule-strong);
+}
+
+/* Blinking terminal caret. */
+.caret {
+	display: inline-block;
+	width: 0.5ch;
+	height: 1em;
+	background: currentColor;
+	margin-left: 1px;
+	vertical-align: text-bottom;
+	animation: caret-blink 1.1s steps(2, start) infinite;
+}
+@keyframes caret-blink {
+	to {
+		visibility: hidden;
+	}
+}
+
+/* Scrollbar polish. */
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--rule-strong);
+	border: 2px solid var(--paper);
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--ink-muted);
+}
+
+/* shiki prose overrides — keep our tokens, drop the library's background. */
+pre.shiki {
+	background: transparent !important;
+	padding: 1rem;
+	overflow-x: auto;
+	font-size: 0.8125rem;
+	line-height: 1.55;
+}
+pre.shiki .line {
+	display: block;
+	min-height: 1.55em;
+}
+pre.shiki .line.highlighted {
+	background: var(--amber-glow);
+	margin: 0 -1rem;
+	padding: 0 1rem;
+	box-shadow: inset 2px 0 0 var(--amber);
+}
+
+/* Shared large section heading — amber ruler + confident title. */
+.section-title {
+	position: relative;
+	display: inline-block;
+	font-family: var(--font-sans);
+	font-size: clamp(1.75rem, 2.5vw, 2.5rem);
+	font-weight: 600;
+	line-height: 1.1;
+	letter-spacing: -0.01em;
+}
+.section-title::before {
+	content: "";
+	display: block;
+	height: 2px;
+	width: 2rem;
+	margin-bottom: 0.75rem;
+	background: var(--amber);
+}

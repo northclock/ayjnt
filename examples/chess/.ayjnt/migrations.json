@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-15T17:25:54.865Z",
+      "new_sqlite_classes": [
+        "MatchAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "match": {
+      "agentId": "match",
+      "className": "MatchAgent",
+      "firstTag": "v1"
+    }
+  }
+}
