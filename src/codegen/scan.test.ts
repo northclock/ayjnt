@@ -8,6 +8,7 @@ import {
   defaultAgentId,
   folderToRoute,
   parseAgentSource,
+  parseCallables,
   resolveMiddlewareChain,
   scan,
 } from "./scan.ts";
@@ -142,11 +143,21 @@ describe("scan (integration)", () => {
 
     await writeFile(
       path.join(tmp, "agents/chat/agent.ts"),
-      `export default class ChatAgent extends Agent<Env, ChatState> {}`,
+      `export default class ChatAgent extends Agent<Env, ChatState> {
+  /**
+   * Echo a message back.
+   * @callable
+   */
+  async echo(text: string): Promise<string> { return text; }
+}`,
     );
     await writeFile(
       path.join(tmp, "agents/chat/app.tsx"),
       `export default function Chat() { return null; }`,
+    );
+    await writeFile(
+      path.join(tmp, "agents/chat/docs.md"),
+      `# Chat agent\n\nUsage example.\n`,
     );
     await writeFile(
       path.join(tmp, "agents/admin/users/agent.ts"),
@@ -181,11 +192,22 @@ describe("scan (integration)", () => {
     expect(chat!.binding).toBe("CHAT_AGENT");
     expect(chat!.agentId).toBe("chat");
     expect(chat!.hasApp).toBe(true);
+    expect(chat!.hasDocs).toBe(true);
+    expect(chat!.callables).toEqual([
+      {
+        name: "echo",
+        params: "text: string",
+        returnType: "Promise<string>",
+        description: "Echo a message back.",
+      },
+    ]);
 
     const admin = byRoute.get("/admin/users");
     expect(admin).toBeDefined();
     expect(admin!.className).toBe("AdminUsersAgent");
     expect(admin!.agentId).toBe("admin_users_v1"); // explicit override wins
+    expect(admin!.hasDocs).toBe(false);
+    expect(admin!.callables).toEqual([]);
     expect(admin!.middlewareChain).toHaveLength(2); // root + admin
     expect(admin!.middlewareChain[0]!.endsWith("agents/middleware.ts")).toBe(
       true,
@@ -204,6 +226,95 @@ describe("scan (integration)", () => {
     const manifest = await scan(empty);
     expect(manifest.agents).toEqual([]);
     rmSync(empty, { recursive: true, force: true });
+  });
+});
+
+describe("parseCallables", () => {
+  test("extracts a single @callable method with params and return type", () => {
+    const src = `
+      export default class A extends Agent {
+        /**
+         * Decrement stock for a SKU.
+         * @callable
+         */
+        async decrement(sku: string, qty: number): Promise<number> {
+          return 0;
+        }
+      }
+    `;
+    expect(parseCallables(src)).toEqual([
+      {
+        name: "decrement",
+        params: "sku: string, qty: number",
+        returnType: "Promise<number>",
+        description: "Decrement stock for a SKU.",
+      },
+    ]);
+  });
+
+  test("ignores methods without the @callable tag", () => {
+    const src = `
+      export default class A extends Agent {
+        /** Helper, internal use only. */
+        async _private(): Promise<void> {}
+        /** @callable */
+        async surface(): Promise<void> {}
+      }
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("surface");
+  });
+
+  test("captures nullary method with no return type annotation", () => {
+    const src = `
+      /**
+       * @callable
+       */
+      reset() {}
+    `;
+    expect(parseCallables(src)).toEqual([
+      { name: "reset", params: "", returnType: null, description: null },
+    ]);
+  });
+
+  test("returns empty array when nothing is annotated", () => {
+    expect(parseCallables(`class X { foo() {} }`)).toEqual([]);
+  });
+
+  test("handles multiple @callable methods on one class", () => {
+    const src = `
+      /** @callable */
+      async getOne(id: string): Promise<Item> {}
+
+      /**
+       * Fetch many items.
+       * @callable
+       */
+      async getMany(ids: string[]): Promise<Item[]> {}
+    `;
+    const out = parseCallables(src);
+    expect(out.map((c) => c.name)).toEqual(["getOne", "getMany"]);
+  });
+
+  test("ignores prose from preceding non-@callable JSDoc blocks", () => {
+    // Without the close-comment guard, a class-level JSDoc would bleed
+    // into the next @callable method's description.
+    const src = `
+      /**
+       * ClassDescription — should NOT appear in any callable description.
+       */
+      export default class A {
+        /**
+         * Real description for surface().
+         * @callable
+         */
+        async surface(): Promise<void> {}
+      }
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.description).toBe("Real description for surface().");
   });
 });
 

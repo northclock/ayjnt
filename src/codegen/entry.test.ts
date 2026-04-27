@@ -16,6 +16,8 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     binding: "CHAT_AGENT",
     sourceFile: "/fake/agents/chat/agent.ts",
     hasApp: false,
+    hasDocs: false,
+    callables: [],
     middlewareChain: [],
     ...overrides,
   };
@@ -227,5 +229,73 @@ describe("generateEntry", () => {
     });
     expect(out).toContain('const CLASSES: Record<Binding, any>');
     expect(out).toContain('"CHAT_AGENT": ChatAgent');
+  });
+
+  test("no docs.md: route entry has docs: null and no embed", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toMatch(/binding: "CHAT_AGENT".*docs: null/);
+  });
+
+  test("with docs option: markdown embedded as JSON-encoded literal", () => {
+    const md = "# Chat\n\n`back`tick and ${interp} survive escaping.";
+    const out = generateEntry(mf([agent({ hasDocs: true })]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+      docs: { CHAT_AGENT: md },
+    });
+    // JSON.stringify ensures backticks and ${} can't break the literal —
+    // unlike template strings, which would corrupt at the first ${.
+    expect(out).toContain(JSON.stringify(md));
+    expect(out).toContain('"hasDocs":true');
+  });
+
+  test("docs request: matchRoute recognizes <route>/docs as a docs match", () => {
+    const out = generateEntry(mf([agent({ hasDocs: true })]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+      docs: { CHAT_AGENT: "# Chat\n" },
+    });
+    // The generated matcher must special-case the literal "docs" segment
+    // BEFORE consuming it as an instanceId, otherwise an instance named
+    // "docs" would shadow the docs route.
+    expect(out).toContain('parts[0] === DOCS_SEGMENT');
+    expect(out).toContain('kind: "docs"');
+    // Dispatch path returns text/markdown for docs, not application/json.
+    expect(out).toContain('text/markdown');
+  });
+
+  test("callable methods are echoed verbatim into the route table", () => {
+    const out = generateEntry(
+      mf([
+        agent({
+          callables: [
+            {
+              name: "decrement",
+              params: "sku: string, qty: number",
+              returnType: "Promise<number>",
+              description: "Decrement stock for a SKU.",
+            },
+          ],
+        }),
+      ]),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain('"name":"decrement"');
+    expect(out).toContain('"params":"sku: string, qty: number"');
+    expect(out).toContain('"returnType":"Promise<number>"');
+  });
+
+  test("catalog: reserved path + middleware probe", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain('CATALOG_PATH = "/__ayjnt/catalog"');
+    expect(out).toContain('url.pathname === CATALOG_PATH');
+    // Probe runs every route's middleware against the original request and
+    // hides routes whose chain short-circuits with a non-2xx response.
+    expect(out).toContain('async function buildCatalog');
+    expect(out).toContain('PROBE_OK');
+    // Each catalog entry exposes hasDocs + a docsUrl when docs exist.
+    expect(out).toContain('docsUrl');
   });
 });

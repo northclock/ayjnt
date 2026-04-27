@@ -14,8 +14,9 @@ export default class InventoryAgent extends Agent<Env, State> {
   };
 
   /**
-   * Public method callable via DO RPC. Throws on insufficient stock so
-   * the caller's transaction fails fast instead of silently going negative.
+   * Decrement stock for a SKU. Throws on insufficient stock so the caller's
+   * transaction fails fast instead of silently going negative.
+   * @callable
    */
   async decrement(sku: string, qty: number): Promise<number> {
     const current = this.state.stock[sku] ?? 0;
@@ -31,8 +32,11 @@ export default class InventoryAgent extends Agent<Env, State> {
     return remaining;
   }
 
-  /** Reset stock to the initial values. Useful for demos; you wouldn't
-   *  expose this in a real inventory system. */
+  /**
+   * Reset stock to the initial values. Useful for demos; you wouldn't
+   * expose this in a real inventory system.
+   * @callable
+   */
   async reset(): Promise<void> {
     this.setState({ stock: { widget: 10, gadget: 5 } });
   }

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-27T04:46:36.521Z",
+      "new_sqlite_classes": [
+        "ReportsAgent",
+        "CatalogAgent",
+        "OrdersAgent",
+        "UsersAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "admin_reports": {
+      "agentId": "admin_reports",
+      "className": "ReportsAgent",
+      "firstTag": "v1"
+    },
+    "catalog": {
+      "agentId": "catalog",
+      "className": "CatalogAgent",
+      "firstTag": "v1"
+    },
+    "orders": {
+      "agentId": "orders",
+      "className": "OrdersAgent",
+      "firstTag": "v1"
+    },
+    "users": {
+      "agentId": "users",
+      "className": "UsersAgent",
+      "firstTag": "v1"
+    }
+  }
+}

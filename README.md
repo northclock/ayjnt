@@ -9,6 +9,7 @@ agents/
   chat/
     agent.ts        ← export default class extends Agent
     app.tsx         ← optional React UI, typed to this agent  (v0.3)
+    docs.md         ← optional markdown — served at /chat/docs (v0.6)
   admin/
     middleware.ts   ← runs for all agents under admin/        (v0.2)
     users/
@@ -21,6 +22,8 @@ ayjnt deploy    # ship it
 ```
 
 **v0.4 — `ayjnt new` bootstrap and MCP agent support.** Scaffold a fresh project with one command (blank starter or with-ui template), and agents extending `McpAgent` route through the Agents SDK's `.serve()` handler automatically so tool-calling LLM integrations work with zero extra wiring.
+
+**v0.6 — agent docs and catalog.** Drop a `docs.md` next to your agent and it gets served at `/<route>/docs`. Tag RPC methods with `/** @callable */` to advertise them in the new built-in `/__ayjnt/catalog` endpoint, which returns a tree of every agent the caller can reach (filtered by middleware, so admin agents stay hidden from anonymous callers). See [`examples/catalog`](./examples/catalog) for the full demo with a React UI that renders the tree.
 
 ## Quickstart
 
@@ -37,7 +40,7 @@ bun run dev
 
 The blank starter gives you a single agent at `/alive/:instance-id` that responds `{"status":"alive","message":"I'm alive"}` — the minimum that proves routing, DO binding, and state wiring all work. Every example in `/examples` starts from this scaffold and replaces `agents/alive` with its own agents.
 
-Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
+Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/catalog`](./examples/catalog) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
 
 ## File conventions
 
@@ -46,6 +49,7 @@ Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`exampl
 - **`agents/.../middleware.ts`** — applies to descendant agents. Nested `middleware.ts` files chain root → leaf like Next.js `layout.tsx`. Default-export a `Middleware` function.
 - **`agents/(group)/...`** — route groups (parens). Stripped from the URL. Used to share middleware across a subset of agents without nesting them in the URL.
 - **`agents/<name>/app.tsx`** — optional React UI for the agent. A typed `useAgent()` hook is generated for you. Bundled with Bun and served from the same URL as the agent.
+- **`agents/<name>/docs.md`** — optional markdown documentation for the agent. Embedded into the worker at build time and served at `<routePath>/docs` with `content-type: text/markdown`. Goes through the same middleware chain as the agent, so the same auth gate that protects the API protects the docs.
 
 ## Commands
 
@@ -290,6 +294,76 @@ On connect, the agent broadcasts `CF_AGENT_IDENTITY` with `{ name: this.name, ag
 
 See [`examples/with-client`](./examples/with-client) for a working demonstration.
 
+## Agent catalog and docs.md
+
+ayjnt exposes a built-in `GET /__ayjnt/catalog` endpoint that returns a JSON tree of every agent the caller can reach, with each agent's `@callable` RPC surface and a link to its `docs.md` (when present).
+
+### docs.md
+
+Drop a `docs.md` file next to your `agent.ts` and `ayjnt build` embeds the markdown into the worker. Hitting `<routePath>/docs` returns it as `text/markdown`:
+
+```sh
+curl http://localhost:8787/inventory/docs
+# # InventoryAgent
+#
+# Owns the stock counters. ...
+```
+
+The docs go through the same middleware chain as the agent. `/admin/reports/docs` is `403 forbidden` to anyone who doesn't pass the `agents/admin/middleware.ts` auth gate — same as `/admin/reports/main`.
+
+The only restriction: `docs` is a reserved instance name. You cannot create a Durable Object instance named exactly `docs` (`/<route>/docs` is always the docs route). `docs-prod`, `docs1`, etc. are fine.
+
+### `@callable` methods
+
+Tag a method with the `@callable` JSDoc tag and it gets surfaced in the catalog along with its parameter signature and return type:
+
+```ts
+export default class InventoryAgent extends Agent<Env, State> {
+  /**
+   * Decrement stock for a SKU.
+   * @callable
+   */
+  async decrement(sku: string, qty: number): Promise<number> { ... }
+}
+```
+
+Tagging is opt-in. Methods without `@callable` stay private to the class — useful when you want internal helpers to NOT appear in the public catalog.
+
+### The catalog endpoint
+
+```sh
+curl http://localhost:8787/__ayjnt/catalog
+```
+
+```json
+{
+  "version": 1,
+  "agents": [
+    {
+      "agentId": "inventory",
+      "className": "InventoryAgent",
+      "routePath": "/inventory",
+      "hasApp": false,
+      "hasDocs": true,
+      "isMcp": false,
+      "callables": [
+        { "name": "decrement", "params": "sku: string, qty: number",
+          "returnType": "Promise<number>", "description": "Decrement stock for a SKU." },
+        { "name": "reset", "params": "", "returnType": "Promise<void>",
+          "description": "Reset stock to the initial values." }
+      ],
+      "docsUrl": "/inventory/docs"
+    }
+  ]
+}
+```
+
+The catalog is **filtered by access**. For each route, the framework runs the agent's middleware chain against the incoming request; if any middleware short-circuits with a non-2xx response, the agent is hidden. So if your `agents/admin/middleware.ts` returns `403` without a bearer token, every agent under `/admin` disappears from the catalog for unauthenticated callers.
+
+The probe inherits the request headers, so a single `Authorization: Bearer ...` header that unlocks `/admin/*` unlocks every admin agent in one round of probes.
+
+See [`examples/catalog`](./examples/catalog) for a full demo with three agents, an admin gate, and a React UI that reads `/__ayjnt/catalog` and renders the tree live.
+
 ## Architecture
 
 ```
@@ -330,7 +404,8 @@ This means two developers cannot race and produce divergent migration histories.
 - [x] **v0.2** — middleware chain (Hono-style `c.next()`), typed `getAgent<T>()` RPC
 - [x] **v0.3** — co-located `app.tsx` with generated typed `useAgent()` hook, `GeneratedEnv` type, path aliases
 - [x] **v0.4** — `ayjnt new` bootstrap with two templates, MCP agent detection + dispatch
-- [ ] **v0.5** — file-watch HMR in dev, docs site generator from READMEs, `create-ayjnt` npm package
+- [x] **v0.6** — `docs.md` per agent, `@callable` JSDoc tag, `/__ayjnt/catalog` endpoint with access-filtered tree
+- [ ] **next** — file-watch HMR in dev, docs site generator from READMEs, `create-ayjnt` npm package
 
 ## Development
 

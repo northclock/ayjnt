@@ -47,6 +47,10 @@ export type EntryOptions = {
    *  Only agents with a co-located app.tsx appear here. The segment is
    *  used to construct asset URLs like /__ayjnt/<flat>/index.html. */
   assetRoutes?: Record<string, string>;
+  /** Map from agent binding → markdown contents of its co-located docs.md.
+   *  Embedded as a string literal in the generated entry so the worker can
+   *  serve it from `<routePath>/docs` without an extra binding. */
+  docs?: Record<string, string>;
 };
 
 export function generateEntry(
@@ -56,6 +60,7 @@ export function generateEntry(
   const outDir = path.dirname(path.resolve(options.outPath));
   const agents = manifest.agents;
   const assetRoutes = options.assetRoutes ?? {};
+  const docsByBinding = options.docs ?? {};
   const hasApps = Object.keys(assetRoutes).length > 0;
 
   // Collect unique middleware files across all agents, preserving first-seen
@@ -103,7 +108,23 @@ export function generateEntry(
       const assetFlatValue = assetFlat
         ? JSON.stringify(assetFlat)
         : "null";
-      return `  { prefix: ${JSON.stringify(a.routePath)}, binding: ${JSON.stringify(a.binding)}, middleware: [${chain}], isMcp: ${mcp}, assetFlat: ${assetFlatValue} },`;
+      // docs.md content embedded as a string literal so docs serving doesn't
+      // need an extra binding. JSON.stringify handles backticks/${} safely.
+      const docs = docsByBinding[a.binding];
+      const docsValue = docs ? JSON.stringify(docs) : "null";
+      // Catalog metadata — echoed back from /__ayjnt/catalog. Kept inline
+      // (not a separate map) so each route carries its own self-describing
+      // record.
+      const callables = JSON.stringify(a.callables);
+      const meta = JSON.stringify({
+        agentId: a.agentId,
+        className: a.className,
+        routePath: a.routePath,
+        hasApp: a.hasApp,
+        hasDocs: a.hasDocs,
+        isMcp: isMcpAgent(a),
+      });
+      return `  { prefix: ${JSON.stringify(a.routePath)}, binding: ${JSON.stringify(a.binding)}, middleware: [${chain}], isMcp: ${mcp}, assetFlat: ${assetFlatValue}, docs: ${docsValue}, callables: ${callables}, meta: ${meta} },`;
     })
     .join("\n");
 
@@ -136,6 +157,22 @@ type Binding = ${bindingUnion};
 
 type Env = ${envType};
 
+type CallableMethod = {
+  name: string;
+  params: string;
+  returnType: string | null;
+  description: string | null;
+};
+
+type CatalogMeta = {
+  agentId: string;
+  className: string;
+  routePath: string;
+  hasApp: boolean;
+  hasDocs: boolean;
+  isMcp: boolean;
+};
+
 type Route = {
   prefix: string;
   binding: Binding;
@@ -146,6 +183,12 @@ type Route = {
   /** Flat route segment for the assets tree, e.g. "admin_users". Null when
    *  the agent has no co-located app.tsx. */
   assetFlat: string | null;
+  /** Inline contents of the agent's docs.md, or null. Served at \`<prefix>/docs\`. */
+  docs: string | null;
+  /** Methods on the agent class flagged with \`@callable\`. Echoed in the catalog. */
+  callables: CallableMethod[];
+  /** Self-describing record returned by /__ayjnt/catalog. */
+  meta: CatalogMeta;
 };
 
 const ROUTES: Route[] = [
@@ -158,14 +201,33 @@ const CLASSES: Record<Binding, any> = {
 ${classMapEntries}
 };
 
-type Match = {
-  binding: Binding;
-  instanceId: string;
-  rest: string;
-  middleware: Middleware<any>[];
-  isMcp: boolean;
-  assetFlat: string | null;
-};
+/** Reserved path that returns the agent catalog as JSON, filtered by which
+ *  agents the caller can pass each agent's middleware chain. Lives under the
+ *  \`/__ayjnt/\` namespace so it can never collide with a user route. */
+const CATALOG_PATH = "/__ayjnt/catalog";
+
+/** Reserved leaf segment served instead of an instance dispatch. \`/<route>/docs\`
+ *  returns the agent's docs.md (404 if no docs.md exists). The trade-off is
+ *  that users can't name a DO instance \`docs\` — documented restriction. */
+const DOCS_SEGMENT = "docs";
+
+type Match =
+  | {
+      kind: "agent";
+      route: Route;
+      binding: Binding;
+      instanceId: string;
+      rest: string;
+      middleware: Middleware<any>[];
+      isMcp: boolean;
+      assetFlat: string | null;
+    }
+  | {
+      kind: "docs";
+      route: Route;
+      binding: Binding;
+      middleware: Middleware<any>[];
+    };
 
 function matchRoute(pathname: string): Match | null {
   for (const route of ROUTES) {
@@ -175,11 +237,25 @@ function matchRoute(pathname: string): Match | null {
     ) {
       const remainder = pathname.slice(route.prefix.length);
       const parts = remainder.split("/").filter(Boolean);
+
+      // \`<route>/docs\` (exactly) → docs request. Hits the same middleware
+      // chain as the agent so auth gates docs too.
+      if (parts.length === 1 && parts[0] === DOCS_SEGMENT) {
+        return {
+          kind: "docs",
+          route,
+          binding: route.binding,
+          middleware: route.middleware,
+        };
+      }
+
       // MCP agents don't use our instanceId scheme — the MCP transport
       // handles session management internally via headers. Accept the
       // route match even without an instance segment.
       if (route.isMcp) {
         return {
+          kind: "agent",
+          route,
           binding: route.binding,
           instanceId: "",
           rest: remainder || "/",
@@ -192,6 +268,8 @@ function matchRoute(pathname: string): Match | null {
       if (!instanceId) return null;
       const rest = "/" + parts.slice(1).join("/");
       return {
+        kind: "agent",
+        route,
         binding: route.binding,
         instanceId,
         rest,
@@ -202,6 +280,62 @@ function matchRoute(pathname: string): Match | null {
     }
   }
   return null;
+}
+
+/**
+ * Build the agent catalog by probing every route's middleware chain with
+ * the original request. A route appears in the result when its middleware
+ * either calls \`next()\` to completion OR returns a 2xx response — both
+ * indicate the caller has access. Any 3xx/4xx/5xx short-circuit hides
+ * the agent.
+ *
+ * Probing runs in parallel and shares the request headers, so an
+ * \`Authorization\` header that unlocks /admin/* unlocks all admin agents
+ * in a single round of probes.
+ */
+async function buildCatalog(
+  request: Request,
+  url: URL,
+  env: Env,
+  executionCtx: ExecutionContext,
+): Promise<unknown> {
+  const PROBE_OK = 999;
+  const sentinel = async (): Promise<Response> =>
+    new Response(null, { status: PROBE_OK });
+
+  const visible = await Promise.all(
+    ROUTES.map(async (route) => {
+      try {
+        let status = PROBE_OK;
+        if (route.middleware.length > 0) {
+          const c = createContext({
+            request,
+            url,
+            env,
+            executionCtx,
+            params: { instanceId: "", pathSuffix: "/" },
+          });
+          const res = await compose(route.middleware, c, sentinel);
+          status = res.status;
+        }
+        const accessible = status === PROBE_OK || (status >= 200 && status < 300);
+        if (!accessible) return null;
+        return {
+          ...route.meta,
+          callables: route.callables,
+          docsUrl: route.meta.hasDocs ? \`\${route.meta.routePath}/\${DOCS_SEGMENT}\` : null,
+        };
+      } catch {
+        // Middleware that throws is treated as inaccessible — fail closed.
+        return null;
+      }
+    }),
+  );
+
+  return {
+    version: 1,
+    agents: visible.filter((a): a is NonNullable<typeof a> => a !== null),
+  };
 }
 
 /**
@@ -228,16 +362,33 @@ export default {
     executionCtx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    // Reserved global path: catalog. Probes every agent's middleware
+    // against the current request and returns only the accessible set.
+    if (url.pathname === CATALOG_PATH) {
+      const catalog = await buildCatalog(request, url, env, executionCtx);
+      return Response.json(catalog);
+    }
+
     const match = matchRoute(url.pathname);
     if (!match) {
       return new Response("Not found", { status: 404 });
     }
 
-    // Middleware runs for both UI and agent dispatch so admin auth gates
-    // the HTML too, not just the API. The choice between "serve HTML",
-    // "forward to DO", and "MCP serve" happens inside finalize, after all
-    // middleware has had a chance to short-circuit.
+    // Middleware runs for both UI, docs, and agent dispatch so admin auth
+    // gates everything, not just the API. The dispatch choice happens
+    // inside finalize, after all middleware has had a chance to short-circuit.
     const finalize = async (): Promise<Response> => {
+      // Docs: serve the embedded markdown. 404 if no docs.md was authored.
+      if (match.kind === "docs") {
+        if (!match.route.docs) {
+          return new Response("docs not found", { status: 404 });
+        }
+        return new Response(match.route.docs, {
+          headers: { "content-type": "text/markdown; charset=utf-8" },
+        });
+      }
+
       if (match.isMcp) {
         // McpAgent.serve produces a { fetch } handler that manages the MCP
         // transport (streamable-http / SSE) at the message level and
@@ -273,12 +424,16 @@ export default {
 
     if (match.middleware.length === 0) return finalize();
 
+    const ctxParams =
+      match.kind === "agent"
+        ? { instanceId: match.instanceId, pathSuffix: match.rest }
+        : { instanceId: "", pathSuffix: "/" + DOCS_SEGMENT };
     const c = createContext({
       request,
       url,
       env,
       executionCtx,
-      params: { instanceId: match.instanceId, pathSuffix: match.rest },
+      params: ctxParams,
     });
     return compose(match.middleware, c, finalize);
   },

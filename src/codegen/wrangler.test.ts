@@ -16,6 +16,8 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     binding: "CHAT_AGENT",
     sourceFile: "/fake/agents/chat/agent.ts",
     hasApp: false,
+    hasDocs: false,
+    callables: [],
     middlewareChain: [],
     ...overrides,
   };

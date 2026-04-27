@@ -1,6 +1,28 @@
 // Shared types. The single source of truth for what the codegen pipeline passes
 // between stages (scan → manifest → migration diff → wrangler/entry emission).
 
+/**
+ * One method on an agent class flagged with the `@callable` JSDoc tag.
+ * Surfaces in the catalog so other agents and external tooling can discover
+ * the public RPC surface (name, parameter signature, return type, blurb).
+ *
+ * Parsed source-level — see `parseCallables` in src/codegen/scan.ts for
+ * limitations.
+ */
+export type CallableMethod = {
+  /** The method name, e.g. "decrement". */
+  name: string;
+  /** Raw parameter list as written between the parens, e.g. `"sku: string, qty: number"`.
+   *  Empty string for nullary methods. */
+  params: string;
+  /** Raw return type as written after the colon, e.g. `"Promise<number>"`.
+   *  `null` when no explicit return type annotation was present. */
+  returnType: string | null;
+  /** First non-tag line of the JSDoc block, used as a one-liner blurb in the
+   *  catalog. `null` when the JSDoc had no description. */
+  description: string | null;
+};
+
 /** A single agent discovered in the file tree. */
 export type AgentEntry = {
   /** Stable identity used by the migration lockfile. Default derived from folderPath;
@@ -19,6 +41,13 @@ export type AgentEntry = {
   sourceFile: string;
   /** Whether a co-located app.tsx exists. */
   hasApp: boolean;
+  /** Whether a co-located docs.md exists. When true the framework serves
+   *  the markdown at `<routePath>/docs` and exposes the URL in the catalog. */
+  hasDocs: boolean;
+  /** Methods on the agent class flagged with a `@callable` JSDoc tag.
+   *  Surfaced in the agent catalog so callers can discover the RPC surface
+   *  without reading source. Empty array when no `@callable` methods exist. */
+  callables: CallableMethod[];
   /** Middleware files that apply to this agent, ordered root → leaf. Absolute paths. */
   middlewareChain: string[];
   /** Name of the class this agent extends, as written in the source. We use

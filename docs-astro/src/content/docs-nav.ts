@@ -91,6 +91,12 @@ export const DOCS_SECTIONS: DocsSection[] = [
 					"app.tsx next to agent.ts, the generated typed hook, and Cloudflare Assets under the hood.",
 			},
 			{
+				slug: "guides/catalog-and-docs",
+				title: "Agent catalog & docs.md",
+				blurb:
+					"docs.md served at <route>/docs, @callable JSDoc tags, and the access-filtered /__ayjnt/catalog endpoint.",
+			},
+			{
 				slug: "guides/mcp",
 				title: "MCP agents",
 				blurb:

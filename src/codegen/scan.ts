@@ -10,9 +10,9 @@
 import { Glob } from "bun";
 import * as path from "node:path";
 import { existsSync } from "node:fs";
-import type { AgentEntry, Manifest } from "../core/types.ts";
+import type { AgentEntry, CallableMethod, Manifest } from "../core/types.ts";
 
-export type { AgentEntry };
+export type { AgentEntry, CallableMethod };
 
 /**
  * Scan the project for agents. Returns a Manifest with all discovered agents
@@ -44,6 +44,7 @@ export async function scan(root: string): Promise<Manifest> {
     const folderPath = normalizeSlashes(path.dirname(rel));
     const agentFolder = path.dirname(agentFile);
     const appFile = path.join(agentFolder, "app.tsx");
+    const docsFile = path.join(agentFolder, "docs.md");
 
     entries.push({
       agentId: parsed.agentId ?? defaultAgentId(folderPath),
@@ -54,6 +55,8 @@ export async function scan(root: string): Promise<Manifest> {
       binding: classNameToBinding(parsed.className),
       sourceFile: agentFile,
       hasApp: existsSync(appFile),
+      hasDocs: existsSync(docsFile),
+      callables: parseCallables(source),
       middlewareChain: await resolveMiddlewareChain(agentFolder, root),
     });
   }
@@ -100,6 +103,64 @@ export function parseAgentSource(source: string): {
     baseClass: classMatch[2],
     agentId: idMatch?.[1] ?? null,
   };
+}
+
+/**
+ * Find every method on the agent class flagged with the `@callable` JSDoc
+ * tag. Returns the method name, its raw parameter signature, return type
+ * (if annotated), and the first prose line of the JSDoc as a description.
+ *
+ * Convention:
+ *
+ *   /**
+ *    * Decrement stock for a SKU.
+ *    * @callable
+ *    *\/
+ *   async decrement(sku: string, qty: number): Promise<number> { ... }
+ *
+ * The tag is the opt-in marker — a method without `@callable` stays
+ * private to the class and is not surfaced in the catalog. This keeps
+ * authors in control of what's advertised as RPC surface.
+ *
+ * Limitations (line-based, like everything else in scan.ts):
+ *   - Parameter lists must fit on one line.
+ *   - Return type may not span lines or contain top-level `{` (object
+ *     literal types as the return annotation aren't supported).
+ *   - JSDoc must immediately precede the method (only blank/whitespace
+ *     between the closing comment and the declaration).
+ */
+export function parseCallables(source: string): CallableMethod[] {
+  const out: CallableMethod[] = [];
+  // Match: a JSDoc block containing @callable, then optional whitespace,
+  // then the method declaration up to its opening `{`.
+  //
+  // The `(?:(?!\*\/)[\s\S])*?` guards prevent the body match from spanning
+  // across an earlier JSDoc's `*/`. Without it, a class-level JSDoc would
+  // get glued to the next `@callable` block and the description would
+  // come from the wrong JSDoc.
+  const re =
+    /\/\*\*((?:(?!\*\/)[\s\S])*?@callable(?:(?!\*\/)[\s\S])*?)\*\/\s*(?:public\s+|private\s+|protected\s+)?(?:override\s+)?(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)(?:\s*:\s*([^{=;\n]+?))?\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const jsdoc = m[1] ?? "";
+    const name = m[2]!;
+    const params = (m[3] ?? "").trim();
+    const returnType = m[4] ? m[4].trim() : null;
+
+    // First non-tag, non-empty line of the JSDoc body, with leading
+    // " * " stripped. Tags ("@callable", "@param ...") are skipped.
+    let description: string | null = null;
+    for (const raw of jsdoc.split("\n")) {
+      const line = raw.replace(/^\s*\*\s?/, "").trim();
+      if (!line) continue;
+      if (line.startsWith("@")) continue;
+      description = line;
+      break;
+    }
+
+    out.push({ name, params, returnType, description });
+  }
+  return out;
 }
 
 /**

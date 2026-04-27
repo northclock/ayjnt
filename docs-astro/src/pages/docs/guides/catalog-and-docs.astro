@@ -1,0 +1,184 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Agent catalog & docs.md — ayjnt docs"
+	description="Drop a docs.md next to agent.ts to serve markdown at /<route>/docs. Tag methods with @callable to advertise them in the built-in /__ayjnt/catalog endpoint."
+>
+	<DocPageShell
+		slug="guides/catalog-and-docs"
+		lede="Per-agent markdown documentation served at /<route>/docs, plus a built-in catalog endpoint that returns every agent the caller can reach with its @callable RPC surface."
+	>
+		<h2>docs.md</h2>
+		<p>
+			Drop a <code>docs.md</code> file next to <code>agent.ts</code>{" "}
+			and <code>ayjnt build</code> embeds the markdown into the worker
+			as a string literal. Hitting <code>&lt;routePath&gt;/docs</code>{" "}
+			returns it with <code>content-type: text/markdown</code>.
+		</p>
+
+		<CodeBlock
+			filename="agents/inventory/docs.md"
+			lang="md"
+			code={`# InventoryAgent
+
+Owns the stock counters. One Durable Object instance per warehouse.
+
+## Callable methods
+
+- \`decrement(sku, qty)\` — atomic decrement; throws on insufficient stock.
+- \`reset()\` — wipes back to seed values.
+
+## State shape
+
+\`\`\`ts
+type State = { stock: Record<string, number> };
+\`\`\`
+`}
+		/>
+
+		<CodeBlock
+			lang="bash"
+			code={`curl http://localhost:8787/inventory/docs
+# # InventoryAgent
+#
+# Owns the stock counters. ...`}
+		/>
+
+		<Callout type="info" title="Same middleware chain as the agent">
+			<code>/&lt;route&gt;/docs</code> runs through every middleware
+			that protects the agent. <code>/admin/reports/docs</code> is{" "}
+			<code>403 forbidden</code> for callers that don't pass{" "}
+			<code>agents/admin/middleware.ts</code> — the docs are gated
+			the same way the API is.
+		</Callout>
+
+		<Callout type="warning" title="‘docs’ is a reserved instance name">
+			You cannot create a Durable Object instance named exactly{" "}
+			<code>docs</code> — <code>/&lt;route&gt;/docs</code> is always
+			the docs route. Names like <code>docs-prod</code> or{" "}
+			<code>docs1</code> are fine.
+		</Callout>
+
+		<h2>@callable methods</h2>
+		<p>
+			Tag a method with the <code>@callable</code> JSDoc tag and it
+			gets surfaced in the catalog along with its parameter
+			signature, return type, and the first prose line of the
+			JSDoc. Tagging is opt-in — internal helpers without the tag
+			stay private.
+		</p>
+
+		<CodeBlock
+			filename="agents/inventory/agent.ts"
+			lang="ts"
+			code={`export default class InventoryAgent extends Agent<Env, State> {
+  /**
+   * Decrement stock for a SKU. Throws on insufficient stock.
+   * @callable
+   */
+  async decrement(sku: string, qty: number): Promise<number> {
+    /* ... */
+  }
+
+  /** Internal helper — NOT in the catalog. */
+  private _seed(): void { /* ... */ }
+}`}
+			highlightLines={[3, 4, 5]}
+		/>
+
+		<Callout type="info" title="Parsed source-level — keep signatures on one line">
+			The scanner is line-based to keep the framework
+			dependency-light. Three constraints:
+			<ul>
+				<li>The JSDoc must immediately precede the method.</li>
+				<li>The parameter list must fit on one line.</li>
+				<li>
+					Return-type annotations may not contain a top-level{" "}
+					<code>{"{"}</code> — object literal types as the return
+					annotation aren't supported.
+				</li>
+			</ul>
+			These match the same line-based extractor the framework uses
+			for class names and <code>agentId</code> overrides.
+		</Callout>
+
+		<h2>The /__ayjnt/catalog endpoint</h2>
+		<p>
+			The framework reserves <code>GET /__ayjnt/catalog</code>. It
+			returns a JSON tree of every agent the caller can reach,
+			along with each agent's <code>@callable</code> methods,{" "}
+			<code>hasApp</code>/<code>hasDocs</code> flags, and (when
+			docs exist) a <code>docsUrl</code>.
+		</p>
+
+		<CodeBlock
+			lang="json"
+			code={`{
+  "version": 1,
+  "agents": [
+    {
+      "agentId": "inventory",
+      "className": "InventoryAgent",
+      "routePath": "/inventory",
+      "hasApp": false,
+      "hasDocs": true,
+      "isMcp": false,
+      "callables": [
+        {
+          "name": "decrement",
+          "params": "sku: string, qty: number",
+          "returnType": "Promise<number>",
+          "description": "Decrement stock for a SKU. Throws on insufficient stock."
+        },
+        {
+          "name": "reset",
+          "params": "",
+          "returnType": "Promise<void>",
+          "description": "Reset stock to the initial values."
+        }
+      ],
+      "docsUrl": "/inventory/docs"
+    }
+  ]
+}`}
+		/>
+
+		<h3>Filtered by access</h3>
+		<p>
+			For each route, the framework runs the agent's middleware
+			chain against the incoming request. If any middleware
+			short-circuits with a non-2xx response, that agent is
+			hidden from the result. So an admin gate that returns{" "}
+			<code>403</code> without a bearer token causes every agent
+			under <code>/admin</code> to disappear from the catalog for
+			anonymous callers.
+		</p>
+		<p>
+			The probe inherits the request headers, so a single{" "}
+			<code>Authorization: Bearer ...</code> header that unlocks{" "}
+			<code>/admin/*</code> unlocks every admin agent in one round
+			of probes.
+		</p>
+
+		<Callout type="warning" title="Probe is fail-closed">
+			Middleware that throws is treated as inaccessible — the
+			agent is hidden. If your auth middleware is doing something
+			expensive (KV lookup, fetch to an upstream identity
+			provider), the catalog endpoint pays that cost once per
+			route per request. Cache aggressively.
+		</Callout>
+
+		<h2>Rendering the catalog as a UI</h2>
+		<p>
+			See <code>examples/catalog</code> for an agent with an{" "}
+			<code>app.tsx</code> that fetches{" "}
+			<code>/__ayjnt/catalog</code> and renders the tree, with a
+			bearer-token field that lets you watch admin agents appear
+			and disappear in real time.
+		</p>
+	</DocPageShell>
+</DocsLayout>

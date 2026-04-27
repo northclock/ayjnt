@@ -1141,6 +1141,339 @@ export default class Tools extends McpAgent<GeneratedEnv, State> {
 		],
 	},
 
+	// --- catalog ------------------------------------------------------------
+	{
+		slug: "catalog",
+		title: "Agent catalog & docs.md",
+		description:
+			"Per-agent docs.md served at /<route>/docs and a built-in /__ayjnt/catalog endpoint that lists every agent the caller can reach (filtered by middleware) with its @callable RPC surface. Includes a React UI that renders the catalog as a live tree.",
+		tags: ["catalog", "docs", "middleware", "ui"],
+		status: "stable",
+		exampleDir: "examples/catalog",
+		preview: {
+			kind: "terminal",
+			lines: [
+				"GET /__ayjnt/catalog",
+				'{ "agents": [{',
+				'  "routePath":"/users",',
+				'  "callables":[…],',
+				'  "docsUrl":"/users/docs"',
+				"}] }",
+			],
+		},
+		whatYoullLearn: [
+			"How to drop a docs.md next to agent.ts and serve it at /<route>/docs",
+			"How the @callable JSDoc tag advertises RPC methods in /__ayjnt/catalog",
+			"How the catalog filters agents by middleware (admin gates hide gated agents)",
+			"How to read the catalog from a React UI to render a live agent tree",
+		],
+		steps: [
+			SCAFFOLD_BLANK,
+			{
+				title: "Three agents — one public, one orders, one admin-gated",
+				blurb:
+					"Each folder is one agent. `users/` and `orders/` are open; `admin/` carries a `middleware.ts` bearer-token gate, so anything underneath (here `admin/reports/`) requires `Authorization: Bearer letmein`. The catalog endpoint will filter visibility based on that gate.",
+				terminal: [
+					{ kind: "command", text: "rm -rf agents/alive" },
+					{ kind: "command", text: "mkdir -p agents/users agents/orders agents/admin/reports agents/catalog" },
+				],
+				treeTitle: "my-app/agents/",
+				tree: [
+					{
+						type: "folder",
+						name: "users",
+						defaultOpen: true,
+						highlight: true,
+						children: [
+							{ type: "file", name: "agent.ts", kind: "ts", note: "3× @callable" },
+							{ type: "file", name: "docs.md", kind: "md", note: "served at /users/docs" },
+						],
+					},
+					{
+						type: "folder",
+						name: "orders",
+						defaultOpen: true,
+						children: [
+							{ type: "file", name: "agent.ts", kind: "ts", note: "2× @callable, no docs" },
+						],
+					},
+					{
+						type: "folder",
+						name: "admin",
+						defaultOpen: true,
+						highlight: true,
+						children: [
+							{ type: "file", name: "middleware.ts", kind: "ts", note: "bearer-token gate" },
+							{
+								type: "folder",
+								name: "reports",
+								defaultOpen: true,
+								children: [
+									{ type: "file", name: "agent.ts", kind: "ts" },
+									{ type: "file", name: "docs.md", kind: "md", note: "also gated" },
+								],
+							},
+						],
+					},
+					{
+						type: "folder",
+						name: "catalog",
+						defaultOpen: true,
+						highlight: true,
+						children: [
+							{ type: "file", name: "agent.ts", kind: "ts", note: "host" },
+							{ type: "file", name: "app.tsx", kind: "tsx", note: "renders the tree" },
+						],
+					},
+				],
+			},
+			{
+				title: "Tag RPC methods with @callable",
+				blurb:
+					"Tagging is opt-in. Methods without the JSDoc `@callable` tag stay private to the class — they're still callable internally but won't appear in the catalog. The first non-tag line of the JSDoc becomes the description.",
+				files: [
+					{
+						path: "agents/users/agent.ts",
+						lang: "ts",
+						code: `import { Agent } from "agents";
+
+type Env = Record<string, never>;
+type User = { id: string; name: string };
+type State = { users: User[] };
+
+export default class UsersAgent extends Agent<Env, State> {
+  override initialState: State = {
+    users: [{ id: "u_1", name: "Ada" }, { id: "u_2", name: "Grace" }],
+  };
+
+  /**
+   * Look up a single user by id.
+   * @callable
+   */
+  async getUser(id: string): Promise<User | null> {
+    return this.state.users.find((u) => u.id === id) ?? null;
+  }
+
+  /**
+   * Return every user in the directory.
+   * @callable
+   */
+  async listUsers(): Promise<User[]> {
+    return this.state.users;
+  }
+
+  /**
+   * Append a new user. Returns the freshly created record.
+   * @callable
+   */
+  async createUser(name: string): Promise<User> {
+    const user: User = { id: \`u_\${this.state.users.length + 1}\`, name };
+    this.setState({ users: [...this.state.users, user] });
+    return user;
+  }
+
+  override async onRequest(): Promise<Response> {
+    return Response.json({ instance: this.name, ...this.state });
+  }
+}`,
+						highlightLines: [12, 13, 14, 15, 21, 22, 23, 24, 30, 31, 32, 33],
+					},
+				],
+			},
+			{
+				title: "docs.md beside agent.ts — served at /<route>/docs",
+				blurb:
+					"`ayjnt build` reads each docs.md and embeds it as a string literal in the generated worker. Hitting `<routePath>/docs` returns the markdown with `content-type: text/markdown`. The same middleware chain that gates the agent gates the docs — `/admin/reports/docs` is 403 without the bearer token.",
+				files: [
+					{
+						path: "agents/users/docs.md",
+						lang: "md",
+						code: `# UsersAgent
+
+A tiny directory of users, stored in agent state.
+
+## Callable methods
+
+| Method | Signature | Description |
+|---|---|---|
+| \`getUser\`    | \`(id: string) => Promise<User | null>\` | Look up a single user by id. |
+| \`listUsers\`  | \`() => Promise<User[]>\`                 | Return every user. |
+| \`createUser\` | \`(name: string) => Promise<User>\`       | Append a new user. |
+
+## HTTP
+
+\`GET /users/<instance>\` returns \`{ instance, users }\`.
+`,
+					},
+					{
+						path: "agents/admin/middleware.ts",
+						lang: "ts",
+						code: `// Anything under agents/admin/ requires a bearer token. The catalog
+// endpoint hides agents whose middleware short-circuits with non-2xx,
+// so /admin/reports disappears from /__ayjnt/catalog without auth.
+
+import type { Middleware } from "ayjnt/middleware";
+
+const middleware: Middleware = async (c, next) => {
+  if (c.request.headers.get("authorization") !== "Bearer letmein") {
+    return c.text("forbidden", 403);
+  }
+  return next();
+};
+
+export default middleware;`,
+					},
+				],
+			},
+			{
+				title: "/__ayjnt/catalog — built-in, access-filtered",
+				blurb:
+					"The framework reserves `GET /__ayjnt/catalog`. For each route it runs the middleware chain against the incoming request — if the chain short-circuits with non-2xx, the agent is hidden. Pass the bearer token and the admin agents reappear.",
+				terminal: [
+					{ kind: "command", text: "bun run dev" },
+					{ kind: "output", text: "✓ ayjnt: 4 agent(s), 1 with UI, 3 with docs → .ayjnt/dist/wrangler.jsonc" },
+					{ kind: "blank" },
+					{ kind: "command", text: "# anonymous — admin/reports hidden" },
+					{ kind: "command", text: "curl localhost:8787/__ayjnt/catalog | jq '.agents[].routePath'" },
+					{ kind: "success", text: '"/catalog"' },
+					{ kind: "success", text: '"/orders"' },
+					{ kind: "success", text: '"/users"' },
+					{ kind: "blank" },
+					{ kind: "command", text: "# with bearer — admin/reports included" },
+					{
+						kind: "command",
+						text: "curl -H 'authorization: Bearer letmein' \\",
+					},
+					{
+						kind: "command",
+						text: "  localhost:8787/__ayjnt/catalog | jq '.agents[].routePath'",
+					},
+					{ kind: "success", text: '"/admin/reports"' },
+					{ kind: "success", text: '"/catalog"' },
+					{ kind: "success", text: '"/orders"' },
+					{ kind: "success", text: '"/users"' },
+					{ kind: "blank" },
+					{ kind: "command", text: "# fetch markdown docs" },
+					{ kind: "command", text: "curl localhost:8787/users/docs" },
+					{ kind: "success", text: "# UsersAgent" },
+					{ kind: "success", text: "..." },
+				],
+			},
+			{
+				title: "agents/catalog/app.tsx — render the tree live",
+				blurb:
+					"The catalog UI is just an `app.tsx` co-located with a no-op `agent.ts`. It fetches `/__ayjnt/catalog`, optionally with an `Authorization` header from a text input, and renders the result as a tree. Watch admin agents appear and disappear as you type the token.",
+				files: [
+					{
+						path: "agents/catalog/app.tsx",
+						lang: "tsx",
+						code: `import { useEffect, useState } from "react";
+
+type Callable = {
+  name: string;
+  params: string;
+  returnType: string | null;
+  description: string | null;
+};
+
+type CatalogEntry = {
+  agentId: string;
+  className: string;
+  routePath: string;
+  hasApp: boolean;
+  hasDocs: boolean;
+  isMcp: boolean;
+  callables: Callable[];
+  docsUrl: string | null;
+};
+
+export default function CatalogApp() {
+  const [token, setToken] = useState("");
+  const [catalog, setCatalog] = useState<{ agents: CatalogEntry[] } | null>(null);
+
+  useEffect(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers["authorization"] = \`Bearer \${token}\`;
+    fetch("/__ayjnt/catalog", { headers })
+      .then((r) => r.json())
+      .then(setCatalog);
+  }, [token]);
+
+  return (
+    <main>
+      <h1>Agent Catalog</h1>
+      <label>
+        Authorization: Bearer
+        <input value={token} onChange={(e) => setToken(e.target.value)} />
+      </label>
+      <ul>
+        {catalog?.agents.map((a) => (
+          <li key={a.agentId}>
+            <code>{a.routePath}</code> — {a.className}
+            {a.docsUrl && <a href={a.docsUrl}> [docs]</a>}
+            <ul>
+              {a.callables.map((c) => (
+                <li key={c.name}>
+                  <code>
+                    {c.name}({c.params}){c.returnType ? \`: \${c.returnType}\` : ""}
+                  </code>
+                  {c.description && <p>{c.description}</p>}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}`,
+						highlightLines: [27, 28, 29, 30, 31, 36, 37, 38, 39, 40],
+					},
+				],
+			},
+			{
+				title: "What it looks like",
+				blurb:
+					"Open `/catalog/me` in a browser. Three agents (users, orders, catalog) and their callables render as a tree. Type `letmein` into the bearer-token field and `/admin/reports` appears with its callable methods listed underneath.",
+				screenshot: {
+					label: "catalog UI — admin section toggling on auth",
+					content: `Agent Catalog
+═════════════
+Authorization: Bearer [          ]   ← anonymous
+
+  /catalog                CatalogAgent  [docs]
+    (no @callable methods)
+
+  /orders                 OrdersAgent
+    createOrder(sku: string, qty: number): Promise<Order>
+      Append a new order to this customer's history.
+    listOrders(): Promise<Order[]>
+      Return every order for this customer.
+
+  /users                  UsersAgent  [docs]
+    getUser(id: string): Promise<User | null>
+      Look up a single user by id.
+    listUsers(): Promise<User[]>
+      Return every user in the directory.
+    createUser(name: string): Promise<User>
+      Append a new user. Returns the freshly created record.
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+Authorization: Bearer [letmein     ]   ← unlocked
+
+  /admin/reports          ReportsAgent  [docs]   ★ NEW
+    listReports(): Promise<Report[]>
+      Return every available report. Sensitive — gated.
+
+  /catalog                CatalogAgent  [docs]
+  /orders                 OrdersAgent
+  /users                  UsersAgent  [docs]`,
+				},
+			},
+			deployStep("https://my-app.<account>.workers.dev"),
+		],
+	},
+
 	// --- scheduled-tasks ----------------------------------------------------
 	{
 		slug: "scheduled-tasks",

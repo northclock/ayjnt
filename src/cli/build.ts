@@ -64,6 +64,8 @@ export type BuildResult = {
   agentCount: number;
   /** Count of agents with a co-located app.tsx that got bundled. */
   appCount: number;
+  /** Count of agents with a co-located docs.md that got embedded. */
+  docsCount: number;
 };
 
 export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
@@ -186,12 +188,30 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   }
 
   // 11-12: worker entry + wrangler config
+  //
+  // docs.md content is loaded once per agent and inlined as a string literal
+  // in the generated entry so the worker can serve it from <route>/docs
+  // without requiring an extra binding (Assets is optional). The catalog
+  // endpoint uses each agent's hasDocs flag to expose the docsUrl.
   const entryPath = path.join(outDir, "entry.ts");
   const wranglerPath = path.join(outDir, "wrangler.jsonc");
 
+  const docsByBinding: Record<string, string> = {};
+  let docsCount = 0;
+  for (const agent of manifest.agents) {
+    if (!agent.hasDocs) continue;
+    const docsPath = path.join(path.dirname(agent.sourceFile), "docs.md");
+    docsByBinding[agent.binding] = await Bun.file(docsPath).text();
+    docsCount++;
+  }
+
   await Bun.write(
     entryPath,
-    generateEntry(manifest, { outPath: entryPath, assetRoutes }),
+    generateEntry(manifest, {
+      outPath: entryPath,
+      assetRoutes,
+      docs: docsByBinding,
+    }),
   );
 
   const name = await resolveWorkerName(cwd);
@@ -204,8 +224,9 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   );
 
   const appSuffix = appCount ? `, ${appCount} with UI` : "";
+  const docsSuffix = docsCount ? `, ${docsCount} with docs` : "";
   log(
-    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix} → .ayjnt/dist/wrangler.jsonc`,
+    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix}${docsSuffix} → .ayjnt/dist/wrangler.jsonc`,
   );
 
   return {
@@ -214,6 +235,7 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     staged: !!diff.nextEntry,
     agentCount: manifest.agents.length,
     appCount,
+    docsCount,
   };
 }
 

@@ -53,6 +53,21 @@ import { FileTree } from "@/components/react/FileTree.tsx";
 				</tr>
 				<tr>
 					<td>
+						<code>docs.md</code>
+					</td>
+					<td>
+						Markdown documentation for this agent. Embedded into the
+						worker at build time and served at{" "}
+						<code>&lt;route&gt;/docs</code>. Goes through the same
+						middleware chain as the agent. See the{" "}
+						<a href="/docs/guides/catalog-and-docs">
+							catalog &amp; docs guide
+						</a>.
+					</td>
+					<td>No</td>
+				</tr>
+				<tr>
+					<td>
 						<code>middleware.ts</code>
 					</td>
 					<td>
