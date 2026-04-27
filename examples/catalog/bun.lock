@@ -13,7 +13,7 @@
         "@types/bun": "latest",
         "@types/react": "^19",
         "@types/react-dom": "^19",
-        "ayjnt": "0.1.0",
+        "ayjnt": "0.5.1",
         "wrangler": "4.82.1",
       },
     },
@@ -309,7 +309,7 @@
 
     "argparse": ["argparse@2.0.1", "", {}, "sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q=="],
 
-    "ayjnt": ["ayjnt@0.1.0", "", { "dependencies": { "agents": "0.10.2", "wrangler": "4.82.1" }, "bin": { "ayjnt": "dist/ayjnt.js" } }, "sha512-kPaCy6U6YETJ7riyR8UpA+slc4uuO4pyaVrV4S2Jn/b5twI+mEp8JvQajiV+M11y9juWicDs7NVmaVr0USieGg=="],
+    "ayjnt": ["ayjnt@0.5.1", "", { "dependencies": { "agents": "0.10.2", "wrangler": "4.82.1" }, "bin": { "ayjnt": "dist/ayjnt.js" } }, "sha512-NilsacvoplM1cN+gwOQRxXmRFnjJsqp6zEmwA/Uv7s6S0IQAa2dgQN/2WsMTsJvqklQGjehRervJ8y6y/OU9Ug=="],
 
     "baseline-browser-mapping": ["baseline-browser-mapping@2.10.23", "", { "bin": { "baseline-browser-mapping": "dist/cli.cjs" } }, "sha512-xwVXGqevyKPsiuQdLj+dZMVjidjJV508TBqexND5HrF89cGdCYCJFB3qhcxRHSeMctdCfbR1jrxBajhDy7o29g=="],
 
