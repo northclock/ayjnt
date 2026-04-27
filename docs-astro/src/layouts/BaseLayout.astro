@@ -1,0 +1,52 @@
+---
+import "@fontsource/geist-sans/400.css";
+import "@fontsource/geist-sans/500.css";
+import "@fontsource/geist-sans/600.css";
+import "@fontsource/geist-sans/700.css";
+import "@fontsource/geist-mono/400.css";
+import "@fontsource/geist-mono/500.css";
+import "@fontsource/geist-mono/600.css";
+import "@/styles/globals.css";
+import Nav from "@/components/Nav.astro";
+import Footer from "@/components/Footer.astro";
+
+type Props = {
+	title?: string;
+	description?: string;
+	ogTitle?: string;
+	ogDescription?: string;
+};
+
+const {
+	title = "ayjnt — Agent-first framework for Cloudflare",
+	description = "File-based routing, auto-generated wrangler config, typed inter-agent RPC, co-located React UIs, and MCP support. No worker boilerplate, no wrangler wrestling.",
+	ogTitle = "ayjnt — Agent-first framework for Cloudflare",
+	ogDescription = "File-based routing for Cloudflare Agents. Write the agent, the framework writes everything else.",
+} = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<meta property="og:title" content={ogTitle} />
+		<meta property="og:description" content={ogDescription} />
+		<meta property="og:type" content="website" />
+		<style is:global>
+			:root {
+				--font-geist-sans: "Geist Sans", system-ui, -apple-system, sans-serif;
+				--font-geist-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+			}
+		</style>
+	</head>
+	<body class="antialiased relative">
+		<Nav />
+		<main class="relative">
+			<slot />
+		</main>
+		<Footer />
+	</body>
+</html>

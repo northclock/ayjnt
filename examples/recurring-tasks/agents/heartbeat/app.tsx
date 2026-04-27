@@ -1,7 +1,6 @@
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/heartbeat";
 
-function Heartbeat() {
+export default function Heartbeat() {
   const agent = useAgent();
   const ticks = agent.state?.ticks ?? [];
   const intervalSeconds = agent.state?.intervalSeconds ?? 0;
@@ -137,6 +136,3 @@ const styles = {
   logTime: { color: "#888", minWidth: 80 },
   logN: { color: "#3b82f6", minWidth: 36 },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Heartbeat />);

@@ -1,0 +1,308 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="MCP agents — ayjnt docs"
+	description="Build a Model Context Protocol server inside ayjnt. Extending McpAgent, registering tools, wiring into Claude Desktop."
+>
+	<DocPageShell
+		slug="guides/mcp"
+		lede="MCP (Model Context Protocol) servers expose tools, resources, and prompts to LLM clients. ayjnt auto-detects McpAgent subclasses and routes them through the SDK's MCP handler."
+	>
+		<h2>What MCP is</h2>
+		<p>
+			MCP is a protocol standardized by Anthropic for giving LLMs
+			structured access to tools, resources, and prompts. An MCP server
+			registers handlers (e.g.{" "}
+			<code>tool("add", schema, handler)</code>) and speaks one
+			of two transports: streamable HTTP (modern) or SSE (legacy).
+			Clients like Claude Desktop, the{" "}
+			<code>@modelcontextprotocol/sdk</code> TypeScript client, or any
+			other MCP-aware agent can connect and invoke tools.
+		</p>
+		<p>
+			Cloudflare's Agents SDK ships an <code>McpAgent</code> base
+			class that handles the transport and session management. You provide
+			the tool registry. ayjnt detects the base class at scan time and
+			wires the dispatch correctly — no manual <code>McpAgent.serve()</code>{" "}
+			call needed.
+		</p>
+
+		<h2>A minimal MCP agent</h2>
+		<p>
+			From <code>examples/mcp</code>:
+		</p>
+		<CodeBlock
+			filename="agents/tools/agent.ts"
+			lang="ts"
+			code={`import { McpAgent } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+
+type State = { invocations: number };
+
+export default class Tools extends McpAgent<{}, State> {
+  override initialState: State = { invocations: 0 };
+
+  server = new McpServer({
+    name: "ayjnt-example-tools",
+    version: "0.1.0",
+  });
+
+  async init() {
+    this.server.tool(
+      "echo",
+      "Echo back whatever you send.",
+      { text: z.string() },
+      async ({ text }) => {
+        this.setState({ invocations: this.state.invocations + 1 });
+        return { content: [{ type: "text", text }] };
+      },
+    );
+
+    this.server.tool(
+      "add",
+      "Add two numbers.",
+      { a: z.number(), b: z.number() },
+      async ({ a, b }) => {
+        this.setState({ invocations: this.state.invocations + 1 });
+        return { content: [{ type: "text", text: String(a + b) }] };
+      },
+    );
+  }
+}`}
+			highlightLines={[1, 7, 10, 15, 16, 21, 22]}
+		/>
+
+		<p>Four things to notice:</p>
+		<ul>
+			<li>
+				<code>extends McpAgent</code> — this is what makes ayjnt route
+				this agent through <code>McpAgent.serve()</code> instead of normal
+				agent dispatch.
+			</li>
+			<li>
+				<code>server = new McpServer(...)</code> — an instance field. The
+				base class looks for this property to route incoming MCP messages.
+			</li>
+			<li>
+				<code>async init()</code> — called once on agent startup. Register
+				your tools/resources/prompts here.
+			</li>
+			<li>
+				Tool handlers can update <code>this.state</code> like any other
+				agent, so MCP servers can have memory across tool calls.
+			</li>
+		</ul>
+
+		<h2>How ayjnt detects MCP agents</h2>
+		<p>
+			The scanner looks at the base class name in the source:
+		</p>
+		<CodeBlock
+			lang="ts"
+			code={`// ✓ detected
+import { McpAgent } from "agents/mcp";
+export default class Tools extends McpAgent<{}, State> { ... }
+
+// ✗ NOT detected — base class is "M", not "McpAgent"
+import { McpAgent as M } from "agents/mcp";
+export default class Tools extends M<{}, State> { ... }
+
+// ✗ NOT detected — base class is "BaseTools"
+abstract class BaseTools extends McpAgent { ... }
+export default class Tools extends BaseTools { ... }`}
+		/>
+		<p>
+			The detection is source-level regex — we specifically match{" "}
+			<code>extends McpAgent</code>. Keep your import plain and you're
+			fine. If ayjnt doesn't recognize the agent as MCP, it'll
+			route normally and the tool protocol won't work.
+		</p>
+
+		<h2>What the dispatch looks like</h2>
+		<p>
+			In the generated <code>.ayjnt/dist/entry.ts</code>, MCP agents get
+			special dispatch:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/entry.ts (generated)"
+			lang="ts"
+			code={`if (match.isMcp) {
+  const ClassRef = CLASSES[match.binding];
+  const handler = ClassRef.serve(
+    ROUTE_PREFIX_BY_BINDING[match.binding],  // "/tools"
+    { binding: match.binding },
+  );
+  return handler.fetch(request, env, executionCtx);
+}`}
+		/>
+		<p>
+			<code>McpAgent.serve(path, opts)</code> returns a{" "}
+			<code>{`{ fetch }`}</code> handler that manages MCP session state,
+			transport negotiation (streamable HTTP vs SSE), and message
+			dispatch to the DO. ayjnt forwards the request to that handler
+			verbatim. Middleware still runs before this dispatch — if you want
+			to rate-limit tool calls or require auth, a{" "}
+			<code>middleware.ts</code> in the MCP agent's folder works
+			like for any other agent.
+		</p>
+
+		<h2>Connecting from Claude Desktop</h2>
+		<p>
+			Once deployed, tell Claude Desktop where your MCP server lives:
+		</p>
+		<CodeBlock
+			filename="~/Library/Application Support/Claude/claude_desktop_config.json"
+			lang="jsonc"
+			code={`{
+  "mcpServers": {
+    "ayjnt-tools": {
+      "url": "https://your-worker.workers.dev/tools"
+    }
+  }
+}`}
+		/>
+		<p>
+			Claude Desktop speaks streamable HTTP by default. The same URL
+			also serves SSE for clients that only support the legacy
+			transport — <code>McpAgent.serve()</code> handles both.
+		</p>
+
+		<h2>Connecting from another MCP client</h2>
+		<p>
+			The <code>@modelcontextprotocol/sdk</code> TypeScript client can
+			connect too:
+		</p>
+		<CodeBlock
+			filename="client.ts"
+			lang="ts"
+			code={`import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const transport = new StreamableHTTPClientTransport(
+  new URL("http://localhost:8787/tools"),
+);
+const client = new Client({ name: "demo-client", version: "0.1.0" });
+await client.connect(transport);
+
+const tools = await client.listTools();
+console.log(tools.tools.map((t) => t.name));
+// → ["echo", "add"]
+
+const result = await client.callTool({
+  name: "add",
+  arguments: { a: 7, b: 42 },
+});
+console.log(result);
+// → { content: [{ type: "text", text: "49" }] }`}
+		/>
+
+		<h2>URL shape is different for MCP</h2>
+		<p>
+			Unlike normal agents (which use{" "}
+			<code>/&lt;route&gt;/&lt;instanceId&gt;</code>), MCP routes use
+			just <code>/&lt;route&gt;</code> — no instance id in the URL.
+			Session management is inside the MCP protocol; each client gets a
+			fresh session via the <code>Mcp-Session-Id</code> header
+			(streamable HTTP) or the <code>sessionId</code> query parameter
+			(SSE). <code>McpAgent.serve()</code> handles creating a per-session
+			DO instance transparently.
+		</p>
+		<p>
+			Consequences to know:
+		</p>
+		<ul>
+			<li>
+				You can't pick an instance from the URL the way you can
+				with a normal agent.
+			</li>
+			<li>
+				Each MCP client session gets isolated state. If you need shared
+				state across sessions (a global rate limit, for instance), keep
+				it in KV or another DO and fetch it from tool handlers.
+			</li>
+			<li>
+				Sessions end when the client disconnects. Don't rely on the
+				same DO sticking around indefinitely.
+			</li>
+		</ul>
+
+		<h2>Advanced: resources and prompts</h2>
+		<p>
+			MCP has three primitives: tools (function calls), resources (file-
+			like content the LLM can read), and prompts (pre-shaped message
+			templates). The <code>McpServer</code> API has{" "}
+			<code>.tool()</code>, <code>.resource()</code>, and{" "}
+			<code>.prompt()</code> methods — all three work in{" "}
+			<code>async init()</code> the same way:
+		</p>
+		<CodeBlock
+			lang="ts"
+			code={`this.server.resource(
+  "notes://today",
+  "Today's agenda",
+  async () => ({
+    contents: [{ uri: "notes://today", text: this.state.notes }],
+  }),
+);
+
+this.server.prompt(
+  "summarize-in-tone",
+  { source: z.string(), tone: z.enum(["formal", "casual"]) },
+  async ({ source, tone }) => ({
+    messages: [
+      { role: "user", content: { type: "text", text: \`Summarize in \${tone}: \${source}\` } },
+    ],
+  }),
+);`}
+		/>
+		<p>
+			For the full schema, see the{" "}
+			<a
+				href="https://developers.cloudflare.com/agents/model-context-protocol/"
+				target="_blank"
+				rel="noreferrer"
+				class="link-underline"
+			>
+				Cloudflare MCP docs
+			</a>{" "}
+			and the{" "}
+			<a
+				href="https://modelcontextprotocol.io/"
+				target="_blank"
+				rel="noreferrer"
+				class="link-underline"
+			>
+				MCP spec itself
+			</a>
+			.
+		</p>
+
+		<h2>Packages you'll need</h2>
+		<CodeBlock
+			lang="sh"
+			code={`bun add agents @modelcontextprotocol/sdk zod`}
+		/>
+		<p>
+			<code>agents</code> includes <code>McpAgent</code> and the server-
+			side transport handling. <code>@modelcontextprotocol/sdk</code>{" "}
+			provides <code>McpServer</code> (what you register tools against)
+			and the client helpers. <code>zod</code> is the schema library{" "}
+			<code>McpServer.tool()</code> expects.
+		</p>
+
+		<Callout kind="tip" title="Install tip">
+			<p>
+				The MCP SDK install pulls a fair bit of transitive weight. If{" "}
+				<code>bun install</code> seems to hang after the lockfile is
+				saved, try <code>bun install --ignore-scripts</code> — one of
+				the transitive postinstalls can loop. See the{" "}
+				<code>examples/mcp/README.md</code> for the exact workaround.
+			</p>
+		</Callout>
+	</DocPageShell>
+</DocsLayout>

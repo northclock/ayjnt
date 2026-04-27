@@ -1,0 +1,290 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Routing & URL shape — ayjnt docs"
+	description="How folder paths become URLs, how requests are matched and forwarded to Durable Objects, and how the worker distinguishes HTML from API calls on the same URL."
+>
+	<DocPageShell
+		slug="guides/routing"
+		lede="Folder tree → URL tree. This page documents exactly how a request finds its way to an agent instance, including how longest-prefix matching works and why we don't use the SDK's routeAgentRequest."
+	>
+		<h2>The URL shape</h2>
+		<p>
+			ayjnt produces URLs of the form:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`/<route-path>/<instanceId>[/<path-suffix>]`}
+		/>
+		<ul>
+			<li>
+				<code>&lt;route-path&gt;</code> — the folder path relative to{" "}
+				<code>agents/</code>, with any <code>(route-group)</code> segments
+				stripped.
+			</li>
+			<li>
+				<code>&lt;instanceId&gt;</code> — the first path segment after the
+				route prefix. Selects which DO instance handles the request. Any
+				string is fine; the SDK calls <code>stub.idFromName(instanceId)</code>{" "}
+				under the hood.
+			</li>
+			<li>
+				<code>&lt;path-suffix&gt;</code> — everything after the instance
+				id. Forwarded to the DO unchanged (visible as{" "}
+				<code>c.params.pathSuffix</code> in middleware).
+			</li>
+		</ul>
+
+		<h2>Examples</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Folder</th>
+					<th>URL prefix</th>
+					<th>Example full URL</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>agents/chat/</code>
+					</td>
+					<td>
+						<code>/chat</code>
+					</td>
+					<td>
+						<code>/chat/room-42</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/admin/users/</code>
+					</td>
+					<td>
+						<code>/admin/users</code>
+					</td>
+					<td>
+						<code>/admin/users/bob</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/(public)/status/</code>
+					</td>
+					<td>
+						<code>/status</code>
+					</td>
+					<td>
+						<code>/status/uptime</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/(auth)/(v2)/account/</code>
+					</td>
+					<td>
+						<code>/account</code>
+					</td>
+					<td>
+						<code>/account/alice</code>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>Matching algorithm</h2>
+		<p>
+			The generated worker entry contains a route table of all discovered
+			agents, sorted <strong>longest-prefix first</strong> so specific
+			routes beat general ones:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/entry.ts (generated)"
+			lang="ts"
+			code={`const ROUTES: Route[] = [
+  { prefix: "/admin/users", binding: "ADMIN_USERS_AGENT", ... },
+  { prefix: "/admin/audit", binding: "ADMIN_AUDIT_AGENT", ... },
+  { prefix: "/admin",       binding: "ADMIN_AGENT",       ... },
+  { prefix: "/chat",        binding: "CHAT_AGENT",        ... },
+];
+
+function matchRoute(pathname: string): Match | null {
+  for (const route of ROUTES) {
+    if (
+      pathname === route.prefix ||
+      pathname.startsWith(route.prefix + "/")
+    ) {
+      // ... extract instanceId from the next segment
+      return match;
+    }
+  }
+  return null;
+}`}
+		/>
+		<p>
+			For a request to <code>/admin/users/bob/edit</code>, the matcher
+			finds <code>/admin/users</code> first (before it would match{" "}
+			<code>/admin</code>), extracts <code>bob</code> as the instance id,
+			and sets <code>pathSuffix</code> to <code>/edit</code>.
+		</p>
+
+		<Callout kind="note" title="Why not routeAgentRequest">
+			The Cloudflare Agents SDK ships a{" "}
+			<code>routeAgentRequest(request, env)</code> helper that matches
+			URLs like <code>/agents/&lt;kebab-name&gt;/&lt;instance&gt;</code>.
+			ayjnt uses its own matcher instead, for three reasons:
+			<ul>
+				<li>
+					We want the URL shape to reflect the folder shape, not a
+					hardcoded <code>/agents/</code> prefix.
+				</li>
+				<li>
+					We need to intercept HTML requests to serve{" "}
+					<code>app.tsx</code> bundles — the SDK matcher doesn't
+					expose a hook for that.
+				</li>
+				<li>
+					We need to apply middleware chains before forwarding to the DO.
+				</li>
+			</ul>
+			This means the ayjnt URL shape is different from the SDK default —
+			see{" "}
+			<a
+				href="/docs/guides/client-integration"
+				class="link-underline"
+			>
+				Client integration
+			</a>{" "}
+			for the one-line fix on the client SDK side.
+		</Callout>
+
+		<h2>Forwarding to the DO</h2>
+		<p>
+			Once the matcher picks a route, the worker forwards to the DO via
+			the SDK's <code>getAgentByName</code>:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/entry.ts (generated, simplified)"
+			lang="ts"
+			code={`import { getAgentByName } from "agents";
+
+// match.instanceId = "bob", match.rest = "/edit"
+const stub = await getAgentByName(env[match.binding], match.instanceId);
+const forwarded = new URL(url);
+forwarded.pathname = match.rest || "/";
+return stub.fetch(new Request(forwarded, request));`}
+		/>
+		<p>
+			Why <code>getAgentByName</code> and not the lower-level{" "}
+			<code>namespace.idFromName(id)</code> +{" "}
+			<code>namespace.get(id)</code>? Because <code>getAgentByName</code>{" "}
+			internally calls <code>stub.setName(name)</code> — that step is what
+			teaches the DO its own identity. Skip it and{" "}
+			<code>CF_AGENT_IDENTITY</code> messages (the ones the client SDK uses
+			to know which instance it's talking to) carry no name, and
+			strange client-side bugs ensue.
+		</p>
+
+		<h2>HTML vs agent on the same URL</h2>
+		<p>
+			When an agent has a co-located <code>app.tsx</code>, the same URL
+			serves two different responses depending on how the client asks:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Request</th>
+					<th>Response</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>GET</code> with <code>Accept: text/html</code>, no{" "}
+						<code>Upgrade</code> header
+					</td>
+					<td>
+						HTML shell from <code>.ayjnt/assets/__ayjnt/&lt;route&gt;/index.html</code>{" "}
+						via the Assets binding
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>GET</code> with <code>Upgrade: websocket</code>
+					</td>
+					<td>
+						WebSocket upgrade handled by the agent
+					</td>
+				</tr>
+				<tr>
+					<td>
+						Any other method, or <code>GET</code> without{" "}
+						<code>Accept: text/html</code>
+					</td>
+					<td>Forwarded to the agent's <code>onRequest</code></td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			Browser navigation to <code>/counter/room-1</code> gets the UI;{" "}
+			<code>curl /counter/room-1</code> (which doesn't set{" "}
+			<code>Accept: text/html</code> by default) gets JSON from the agent;{" "}
+			<code>useAgent()</code> in the bundled JS upgrades to WebSocket on
+			the same URL and starts syncing state. One URL, three shapes.
+		</p>
+
+		<h2>Custom paths inside an agent</h2>
+		<p>
+			The path suffix after the instance id is forwarded unchanged, so you
+			can implement REST-style sub-routes inside <code>onRequest</code>:
+		</p>
+		<CodeBlock
+			filename="agents/orders/agent.ts"
+			lang="ts"
+			code={`export default class OrdersAgent extends Agent<Env, State> {
+  override async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    // pathSuffix is everything after /orders/<customer>/ — "/line-items", "/cancel", "/"
+    switch (url.pathname) {
+      case "/line-items":
+        return Response.json({ items: this.state.items });
+      case "/cancel":
+        if (request.method !== "POST") return new Response(null, { status: 405 });
+        this.setState({ ...this.state, cancelled: true });
+        return Response.json({ ok: true });
+      default:
+        return Response.json(this.state);
+    }
+  }
+}`}
+		/>
+		<p>
+			The inner pathname is relative — <code>/line-items</code>, not{" "}
+			<code>/orders/:id/line-items</code>. That's because the worker
+			rewrites the URL before forwarding to the DO, so the agent sees a
+			clean suffix. If you need the original URL for logging, middleware
+			can capture it before dispatching.
+		</p>
+
+		<h2>What's not routable</h2>
+		<ul>
+			<li>
+				Requests to <code>/</code> or any path that doesn't match a
+				route prefix return a <code>404</code> from the generated entry.
+				You can catch these in middleware if you want a custom 404 page —
+				or add an agent at the root (<code>agents/root/agent.ts</code>{" "}
+				serving a marketing homepage, for example) though the URL shape
+				makes that a little awkward.
+			</li>
+			<li>
+				The reserved <code>/__ayjnt/*</code> prefix is claimed by the
+				Assets binding for serving <code>app.tsx</code> bundles.
+				Don't create agents under that segment.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

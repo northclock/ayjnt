@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
 import { useAgent } from "@ayjnt/sector";
 
@@ -13,7 +12,7 @@ function pickName(): string {
   return trimmed;
 }
 
-function Game() {
+export default function Game() {
   const [name] = useState(pickName);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const agent = useAgent();
@@ -245,6 +244,3 @@ const styles = {
   },
   scoreSelf: { color: "#22c55e" },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Game />);

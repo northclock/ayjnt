@@ -1,0 +1,315 @@
+---
+import { Code2, GitBranch, LayoutGrid, Package } from "lucide-react";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import Button from "@/components/Button.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+import { Terminal } from "@/components/react/Terminal.tsx";
+import { FileTree } from "@/components/react/FileTree.tsx";
+import { FeatureContent } from "@/components/react/FeatureContent.tsx";
+import { ExampleCard } from "@/components/react/ExampleCard.tsx";
+import { ArchitectureDiagram } from "@/components/react/ArchitectureDiagram.tsx";
+import { EXAMPLES } from "@/content/examples";
+
+const featured = EXAMPLES.filter((e) => e.status === "stable").slice(0, 6);
+
+const interAgentCode = `// agents/orders/agent.ts
+import { Agent } from "agents";
+import { getAgent } from "ayjnt/rpc";
+import type InventoryAgent from "../inventory/agent.ts";
+
+export default class OrdersAgent extends Agent<Env, State> {
+  override async onRequest(request: Request): Promise<Response> {
+    const { sku, qty } = await request.json();
+    const inventory = await getAgent<InventoryAgent>(
+      this.env.INVENTORY_AGENT,
+      "main",
+    );
+    const remaining = await inventory.decrement(sku, qty);
+    return Response.json({ ok: true, remaining });
+  }
+}`;
+
+const quickStartBullets = [
+	"New project with minimal or with-ui template",
+	"Generated wrangler config, migrations, and entry point",
+	"HMR-backed dev server that rebuilds on file-tree changes",
+];
+
+const quickStartTerminal = [
+	{ kind: "command" as const, text: "bunx ayjnt new my-agent-app" },
+	{ kind: "output" as const, text: "✓ scaffolded my-agent-app/ (minimal)" },
+	{ kind: "blank" as const },
+	{ kind: "command" as const, text: "cd my-agent-app && bun install" },
+	{ kind: "output" as const, text: "✓ 237 packages installed [3.2s]" },
+	{ kind: "blank" as const },
+	{ kind: "command" as const, text: "bun run dev" },
+	{ kind: "success" as const, text: "✓ ayjnt: 1 agent(s) → .ayjnt/dist/wrangler.jsonc" },
+	{ kind: "output" as const, text: "⎔ Listening on http://localhost:8787" },
+];
+
+const fileTreeRoot = [
+	{
+		type: "folder" as const,
+		name: "agents",
+		defaultOpen: true,
+		children: [
+			{
+				type: "folder" as const,
+				name: "chat",
+				defaultOpen: true,
+				children: [
+					{ type: "file" as const, name: "agent.ts", kind: "ts" as const, note: "state + methods" },
+					{ type: "file" as const, name: "app.tsx", kind: "tsx" as const, note: "React UI" },
+				],
+			},
+			{
+				type: "folder" as const,
+				name: "admin",
+				defaultOpen: true,
+				children: [
+					{ type: "file" as const, name: "middleware.ts", kind: "ts" as const, note: "auth" },
+					{
+						type: "folder" as const,
+						name: "users",
+						defaultOpen: true,
+						children: [{ type: "file" as const, name: "agent.ts", kind: "ts" as const }],
+					},
+				],
+			},
+			{
+				type: "folder" as const,
+				name: "(public)",
+				defaultOpen: true,
+				note: "route group",
+				children: [
+					{
+						type: "folder" as const,
+						name: "status",
+						defaultOpen: true,
+						children: [{ type: "file" as const, name: "agent.ts", kind: "ts" as const }],
+					},
+				],
+			},
+		],
+	},
+];
+
+const interAgentFacts: Array<[string, string]> = [
+	["native Workers RPC", "no HTTP, no JSON round-trip"],
+	["method autocomplete", "from the target class"],
+	["exceptions propagate", "throw in callee, catch in caller"],
+];
+---
+<BaseLayout>
+	<div>
+		<!-- Hero -->
+		<section class="relative isolate overflow-hidden border-b border-[var(--ink)]">
+			<div class="grid-paper absolute inset-0 opacity-60"></div>
+			<div class="relative mx-auto max-w-6xl px-6 pt-20 pb-24 md:pt-28 md:pb-32">
+				<span class="tag mb-5">v0.1 · Bun-first · for Cloudflare Workers</span>
+				<h1 class="text-balance font-sans text-5xl font-semibold leading-[1.05] tracking-tight md:text-7xl">
+					Write the agent.
+					<br />
+					<span class="relative inline-block">
+						/AYjnt/ writes
+						<span aria-hidden="true" class="absolute inset-x-0 -bottom-1 h-3 bg-[var(--amber-glow)]"></span>
+					</span>{" "}
+					everything else.
+				</h1>
+				<p class="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--ink-soft)] md:text-xl">
+					Agent-first framework for Cloudflare. File-based routing,
+					auto-generated wrangler config, typed inter-agent RPC, co-located
+					React UIs, and MCP support — so you can ship Durable Object agents
+					without ever opening <code class="font-mono">wrangler.jsonc</code>.
+				</p>
+				<div class="mt-8 flex flex-wrap items-center gap-3">
+					<Button href="/docs" variant="primary">
+						<Code2 className="h-4 w-4" /> Read the docs
+					</Button>
+					<Button href="/examples" variant="secondary">
+						<LayoutGrid className="h-4 w-4" /> Browse examples
+					</Button>
+					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
+						<GitBranch className="h-4 w-4" /> GitHub
+					</Button>
+				</div>
+			</div>
+		</section>
+
+		<!-- Quick start -->
+		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
+			<div class="mx-auto grid max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[1.1fr_1fr]">
+				<div>
+					<h2 class="section-title">Quick start</h2>
+					<p class="mt-4 max-w-lg text-lg leading-relaxed text-[var(--ink-soft)]">
+						One command scaffolds a project with a working agent. A second
+						command starts a local Cloudflare worker you can hit from curl or
+						the Agents client SDK.
+					</p>
+					<ul class="mt-6 space-y-3 text-sm">
+						{quickStartBullets.map((item) => (
+							<li class="flex items-start gap-2">
+								<span class="mt-2 inline-block h-1.5 w-1.5 bg-[var(--amber)]" aria-hidden="true"></span>
+								<span class="text-[var(--ink-soft)]">{item}</span>
+							</li>
+						))}
+					</ul>
+				</div>
+				<Terminal client:visible title="terminal — zsh" lines={quickStartTerminal} />
+			</div>
+		</section>
+
+		<!-- File tree showcase -->
+		<section class="border-b border-[var(--ink)]">
+			<div class="mx-auto grid max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[1fr_1.1fr]">
+				<FileTree client:visible title="agents/ — the whole API" root={fileTreeRoot} />
+				<div>
+					<h2 class="section-title">The folder is the framework</h2>
+					<p class="mt-4 text-lg leading-relaxed text-[var(--ink-soft)]">
+						The shape you draft in <code class="font-mono">agents/</code>{" "}
+						maps 1:1 to URLs, DO bindings, migrations, and the worker
+						entrypoint. There is no config file to author — just files and
+						folders.
+					</p>
+					<dl class="mt-8 grid gap-5 sm:grid-cols-2">
+						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">agent.ts</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								One default-exported class per folder. Name + state + methods.
+							</dd>
+						</div>
+						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">middleware.ts</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								Applies to descendant agents. Root → leaf chaining, Hono-style{" "}
+								<code class="font-mono">next()</code>.
+							</dd>
+						</div>
+						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">app.tsx</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								Optional React UI. Gets a typed{" "}
+								<code class="font-mono">useAgent()</code> bound to this folder.
+							</dd>
+						</div>
+						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">(parens)</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								Route groups — share middleware without nesting the URL.
+							</dd>
+						</div>
+					</dl>
+				</div>
+			</div>
+		</section>
+
+		<!-- Features -->
+		<section class="border-b border-[var(--ink)] bg-[var(--paper)]">
+			<div class="mx-auto max-w-6xl px-6 py-20">
+				<header class="mb-10 max-w-2xl">
+					<h2 class="section-title">What you get</h2>
+					<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
+						Six tools-in-one: routing, migrations, RPC, UI, MCP, dev loop.
+						None of the glue.{" "}
+						<span class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
+							click any card for a visual deep-dive
+						</span>
+					</p>
+				</header>
+				<FeatureContent client:visible />
+			</div>
+		</section>
+
+		<!-- Inter-agent RPC -->
+		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
+			<div class="mx-auto grid max-w-6xl items-center gap-10 px-6 py-20 md:grid-cols-[1.1fr_1fr]">
+				<div>
+					<h2 class="section-title">Agents that call each other, typed.</h2>
+					<p class="mt-4 text-lg leading-relaxed text-[var(--ink-soft)]">
+						<code class="font-mono">getAgent&lt;T&gt;</code> returns a
+						typed DurableObject stub. Method autocomplete from the target
+						class. Errors propagate across the RPC boundary as exceptions.
+						Rename a method and both sides break at compile time.
+					</p>
+					<ul class="mt-6 space-y-3 text-sm">
+						{interAgentFacts.map(([k, v]) => (
+							<li class="flex items-baseline gap-3">
+								<span class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
+									{k}
+								</span>
+								<span class="text-[var(--ink-soft)]">→ {v}</span>
+							</li>
+						))}
+					</ul>
+				</div>
+				<CodeBlock
+					filename="agents/orders/agent.ts"
+					lang="ts"
+					code={interAgentCode}
+					highlightLines={[3, 9, 10, 11, 12]}
+				/>
+			</div>
+		</section>
+
+		<!-- Pipeline / architecture -->
+		<section class="border-b border-[var(--ink)]">
+			<div class="mx-auto max-w-6xl px-6 py-20">
+				<header class="mb-10 max-w-2xl">
+					<h2 class="section-title">Under the hood</h2>
+					<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
+						Every build is a pure function of your file tree. The pipeline is
+						small and inspectable — peek at{" "}
+						<code class="font-mono">.ayjnt/dist/entry.ts</code> any time.
+					</p>
+				</header>
+				<ArchitectureDiagram client:visible />
+			</div>
+		</section>
+
+		<!-- Featured examples -->
+		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
+			<div class="mx-auto max-w-6xl px-6 py-20">
+				<header class="mb-10 flex items-end justify-between gap-4">
+					<div class="max-w-2xl">
+						<h2 class="section-title">Build these</h2>
+						<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
+							Every example in the gallery has a scaffold command, the code
+							you'd add to which file, an animated terminal walkthrough,
+							and the deploy step.
+						</p>
+					</div>
+					<a href="/examples" class="link-underline hidden shrink-0 font-mono text-sm md:inline">
+						All examples →
+					</a>
+				</header>
+				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+					{featured.map((e) => (
+						<ExampleCard client:visible example={e} />
+					))}
+				</div>
+			</div>
+		</section>
+
+		<!-- CTA -->
+		<section class="relative border-b border-[var(--ink)]">
+			<div class="grid-paper-dots absolute inset-0 opacity-50"></div>
+			<div class="relative mx-auto max-w-4xl px-6 py-20 text-center">
+				<h2 class="section-title inline-block">Ready when you are.</h2>
+				<p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-[var(--ink-soft)]">
+					One command scaffolds the project. One command ships it.
+				</p>
+				<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+					<Button href="/docs" variant="primary">
+						<Code2 className="h-4 w-4" /> Start the docs
+					</Button>
+					<Button href="https://www.npmjs.com/package/ayjnt" variant="secondary" external>
+						<Package className="h-4 w-4" /> ayjnt on npm
+					</Button>
+					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
+						<GitBranch className="h-4 w-4" /> Source on GitHub
+					</Button>
+				</div>
+			</div>
+		</section>
+	</div>
+</BaseLayout>

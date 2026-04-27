@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
 import { useAgent } from "@ayjnt/room";
 
@@ -13,7 +12,7 @@ function pickName(): string {
   return trimmed;
 }
 
-function Room() {
+export default function Room() {
   const [name] = useState(pickName);
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState<Record<string, number>>({});
@@ -250,6 +249,3 @@ const styles = {
     cursor: "pointer",
   },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Room />);

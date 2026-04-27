@@ -1,8 +1,7 @@
-import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
 import { useAgent } from "@ayjnt/chat";
 
-function Chat() {
+export default function Chat() {
   const agent = useAgent();
   const [draft, setDraft] = useState("");
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -192,6 +191,3 @@ const styles = {
   },
   sendDisabled: { background: "#9ca3af", cursor: "not-allowed" },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Chat />);

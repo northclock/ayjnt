@@ -1,7 +1,6 @@
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/scout";
 
-function Scout() {
+export default function Scout() {
   const agent = useAgent();
   const state = agent.state;
 
@@ -220,6 +219,3 @@ const styles = {
   sev: { fontSize: 11 },
   empty: { color: "#64748b", padding: 16, textAlign: "center" as const },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Scout />);

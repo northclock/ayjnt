@@ -21,12 +21,15 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import {
   bundleApp,
+  clientDirFor,
   clientFileFor,
   flattenRoute,
   generateClientHook,
   generateEnvTypes,
   generateHtmlShell,
+  generateMountEntry,
   generateTsconfig,
+  hasDefaultExport,
 } from "../codegen/client.ts";
 import { generateEntry } from "../codegen/entry.ts";
 import {
@@ -122,6 +125,14 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   //     assetRoutes maps each binding → flat route segment so the
   //     generated entry.ts knows which asset path to fetch when serving
   //     HTML for that agent.
+  //
+  //     New in v0.5: if app.tsx exports a default React component, we
+  //     generate a mount wrapper at .ayjnt/client/<route>/mount.tsx and
+  //     bundle THAT instead of the user file. The wrapper owns
+  //     createRoot + StrictMode + error boundary, so users never write
+  //     mount boilerplate. If app.tsx has no default export we assume
+  //     the legacy manual-mount pattern and bundle it directly, with a
+  //     deprecation warning.
   const assetRoutes: Record<string, string> = {};
   let appCount = 0;
   for (const agent of manifest.agents) {
@@ -130,8 +141,38 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     const perRouteDir = path.join(assetsScoped, flat);
     mkdirSync(perRouteDir, { recursive: true });
 
-    const appEntry = path.join(path.dirname(agent.sourceFile), "app.tsx");
-    const bundledJs = await bundleApp({ appEntry, projectRoot: cwd });
+    const userAppPath = path.join(path.dirname(agent.sourceFile), "app.tsx");
+    const source = await Bun.file(userAppPath).text();
+
+    let bundleEntry: string;
+    if (hasDefaultExport(source)) {
+      // Generated mount wrapper lives next to the typed useAgent hook
+      // so both sit in the same client subtree.
+      const mountDir = path.join(dotDir, clientDirFor(agent));
+      if (!existsSync(mountDir)) mkdirSync(mountDir, { recursive: true });
+      const mountPath = path.join(mountDir, "mount.tsx");
+      const appImportPath = path
+        .relative(path.dirname(mountPath), userAppPath)
+        .replace(/\\/g, "/");
+      const importSpec = appImportPath.startsWith(".")
+        ? appImportPath
+        : "./" + appImportPath;
+      await Bun.write(
+        mountPath,
+        generateMountEntry({ appImportPath: importSpec }),
+      );
+      bundleEntry = mountPath;
+    } else {
+      log(
+        `⚠ ayjnt: ${path.relative(cwd, userAppPath)} uses manual createRoot — deprecated. Export default your component; the framework will handle the mount.`,
+      );
+      bundleEntry = userAppPath;
+    }
+
+    const bundledJs = await bundleApp({
+      appEntry: bundleEntry,
+      projectRoot: cwd,
+    });
     await Bun.write(path.join(perRouteDir, "app.js"), bundledJs);
     await Bun.write(
       path.join(perRouteDir, "index.html"),

@@ -1,0 +1,72 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ExampleCard } from "@/components/react/ExampleCard.tsx";
+import { EXAMPLES } from "@/content/examples";
+
+const stable = EXAMPLES.filter((e) => e.status === "stable");
+const planned = EXAMPLES.filter((e) => e.status === "comingSoon");
+---
+<BaseLayout
+	title="Examples — ayjnt"
+	description="Real ayjnt projects, from smallest-possible agent up to multi-agent missions. Each card links to a scaffold + code + deploy walkthrough."
+>
+	<div>
+		<section class="relative isolate border-b border-[var(--ink)]">
+			<div class="grid-paper absolute inset-0 opacity-50"></div>
+			<div class="relative mx-auto max-w-6xl px-6 pt-16 pb-12">
+				<span class="tag mb-4">gallery</span>
+				<h1 class="font-sans text-4xl font-semibold leading-tight tracking-tight md:text-5xl">
+					Examples you can copy.
+				</h1>
+				<p class="mt-4 max-w-2xl text-lg leading-relaxed text-[var(--ink-soft)]">
+					Every stable example here lives in <code class="font-mono">/examples</code>{" "}
+					on GitHub. Each page on this site shows the scaffolding command,
+					the code you'd add to which file, an animated terminal
+					walkthrough, and the deploy step.
+				</p>
+			</div>
+		</section>
+
+		<section class="border-b border-[var(--ink)] bg-[var(--paper)]">
+			<div class="mx-auto max-w-6xl px-6 py-14">
+				<header class="max-w-2xl">
+					<div class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
+						Stable
+					</div>
+					<h2 class="mt-2 font-sans text-2xl font-semibold tracking-tight md:text-3xl">
+						Built and shipped
+					</h2>
+					<p class="mt-2 text-[var(--ink-soft)]">
+						{stable.length} examples ready to fork, run, and deploy.
+					</p>
+				</header>
+				<div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+					{stable.map((e) => (
+						<ExampleCard client:visible example={e} />
+					))}
+				</div>
+			</div>
+		</section>
+
+		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
+			<div class="mx-auto max-w-6xl px-6 py-14">
+				<header class="max-w-2xl">
+					<div class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
+						Coming soon
+					</div>
+					<h2 class="mt-2 font-sans text-2xl font-semibold tracking-tight md:text-3xl">
+						Planned examples
+					</h2>
+					<p class="mt-2 text-[var(--ink-soft)]">
+						Design + spec in place; implementations land as they're ready.
+					</p>
+				</header>
+				<div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+					{planned.map((e) => (
+						<ExampleCard client:visible example={e} />
+					))}
+				</div>
+			</div>
+		</section>
+	</div>
+</BaseLayout>

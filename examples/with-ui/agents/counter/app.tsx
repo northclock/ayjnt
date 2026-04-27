@@ -1,7 +1,6 @@
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/counter";
 
-function Counter() {
+export default function Counter() {
   const agent = useAgent();
   // `state` is typed as { count: number } | undefined because it isn't set
   // until the first CF_AGENT_STATE message arrives. Default to 0 in the UI
@@ -54,6 +53,3 @@ const styles = {
     cursor: "pointer",
   },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Counter />);

@@ -1,0 +1,272 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+import { FileTree } from "@/components/react/FileTree.tsx";
+
+const tree = [
+	{
+		type: "folder" as const,
+		name: "agents",
+		defaultOpen: true,
+		note: "you write this",
+		children: [
+			{
+				type: "folder" as const,
+				name: "counter",
+				defaultOpen: true,
+				children: [
+					{ type: "file" as const, name: "agent.ts", kind: "ts" as const },
+					{ type: "file" as const, name: "app.tsx", kind: "tsx" as const, note: "optional UI" },
+				],
+			},
+			{ type: "file" as const, name: "middleware.ts", kind: "ts" as const, note: "optional" },
+		],
+	},
+	{
+		type: "folder" as const,
+		name: ".ayjnt",
+		defaultOpen: true,
+		note: "generated",
+		children: [
+			{ type: "file" as const, name: "migrations.json", kind: "json" as const, note: "COMMIT THIS" },
+			{ type: "file" as const, name: "tsconfig.json", kind: "jsonc" as const, note: "gitignored" },
+			{ type: "file" as const, name: "env.d.ts", kind: "ts" as const, note: "gitignored" },
+			{
+				type: "folder" as const,
+				name: "client",
+				defaultOpen: false,
+				note: "gitignored",
+				children: [
+					{
+						type: "folder" as const,
+						name: "counter",
+						defaultOpen: false,
+						children: [{ type: "file" as const, name: "index.tsx", kind: "tsx" as const }],
+					},
+				],
+			},
+			{
+				type: "folder" as const,
+				name: "dist",
+				defaultOpen: false,
+				note: "gitignored",
+				children: [
+					{ type: "file" as const, name: "entry.ts", kind: "ts" as const },
+					{ type: "file" as const, name: "wrangler.jsonc", kind: "jsonc" as const },
+				],
+			},
+			{
+				type: "folder" as const,
+				name: "assets",
+				defaultOpen: false,
+				note: "gitignored (if UI)",
+				children: [
+					{
+						type: "folder" as const,
+						name: "__ayjnt",
+						defaultOpen: false,
+						children: [
+							{
+								type: "folder" as const,
+								name: "counter",
+								defaultOpen: false,
+								children: [
+									{ type: "file" as const, name: "index.html" },
+									{ type: "file" as const, name: "app.js" },
+								],
+							},
+						],
+					},
+				],
+			},
+		],
+	},
+	{ type: "file" as const, name: "package.json", kind: "json" as const },
+	{ type: "file" as const, name: "tsconfig.json", kind: "json" as const },
+	{ type: "file" as const, name: ".gitignore", kind: "txt" as const },
+];
+---
+<DocsLayout
+	title="Project anatomy — ayjnt docs"
+	description="A tour of the files you author vs the files ayjnt regenerates."
+>
+	<DocPageShell
+		slug="getting-started/project-anatomy"
+		lede="There are two kinds of files in an ayjnt project: the ones you write, and the ones the framework regenerates. Knowing which is which saves hours of future confusion."
+	>
+		<h2>The full tree</h2>
+		<FileTree client:visible root={tree} />
+
+		<h2>Files you author</h2>
+
+		<h3>
+			<code>agents/&lt;name&gt;/agent.ts</code>
+		</h3>
+		<p>
+			One class per folder, default-exported, extending <code>Agent</code>{" "}
+			(or <code>McpAgent</code>). The folder name becomes the URL prefix;
+			the class name becomes the DO binding (<code>CounterAgent</code> →{" "}
+			<code>COUNTER_AGENT</code>).
+		</p>
+
+		<h3>
+			<code>agents/&lt;name&gt;/app.tsx</code> (optional)
+		</h3>
+		<p>
+			React UI for this agent. Imports <code>useAgent</code> from{" "}
+			<code>@ayjnt/&lt;route&gt;</code>, which is a typed hook the framework
+			generates. Bundled with Bun and served at the same URL via Cloudflare
+			Assets.
+		</p>
+
+		<h3>
+			<code>agents/.../middleware.ts</code> (optional)
+		</h3>
+		<p>
+			Applies to every agent at or below this folder. Hono-style{" "}
+			<code>(c, next) =&gt; Response</code>. Root → leaf chaining; the{" "}
+			<code>agents/middleware.ts</code> at the top of the tree runs first,
+			nested ones run next, then the agent.
+		</p>
+
+		<h3>
+			<code>package.json</code>
+		</h3>
+		<p>
+			Standard Bun/npm manifest. The ayjnt scripts you run (<code>dev</code>,
+			<code>build</code>, <code>deploy</code>, <code>migrate</code>) invoke
+			the CLI. You own this file.
+		</p>
+
+		<h3>
+			<code>tsconfig.json</code>
+		</h3>
+		<p>
+			You own this file. The <code>ayjnt new</code> template pre-fills it
+			with two path aliases that make the generated hooks importable:
+		</p>
+		<CodeBlock
+			filename="tsconfig.json"
+			lang="jsonc"
+			code={`{
+  "compilerOptions": {
+    "paths": {
+      "@ayjnt/env": ["./.ayjnt/env.d.ts"],
+      "@ayjnt/*": ["./.ayjnt/client/*"]
+    }
+  }
+}`}
+			highlightLines={[4, 5]}
+		/>
+		<p>
+			The <code>./</code> prefix is required — TypeScript rejects path
+			mappings without <code>baseUrl</code> unless they're relative.
+		</p>
+
+		<h2>Files ayjnt regenerates</h2>
+
+		<h3>
+			<code>.ayjnt/migrations.json</code> <span class="tag">committed</span>
+		</h3>
+		<p>
+			The only file in <code>.ayjnt/</code> that is checked into git. It's
+			the source of truth for what DO schema is in production. Every build
+			diffs the current file tree against this lockfile and stages a new
+			migration entry if anything changed.{" "}
+			<code>ayjnt deploy</code> refuses to run if your git tree is
+			out of sync with origin/main.
+		</p>
+
+		<h3>
+			<code>.ayjnt/dist/entry.ts</code> <span class="tag">gitignored</span>
+		</h3>
+		<p>
+			The worker's actual entrypoint. It re-exports every agent class
+			(so the Durable Object runtime can find them by name), builds a
+			route table sorted longest-prefix first, and dispatches requests —
+			HTML goes to the Assets binding, MCP agents go to{" "}
+			<code>McpAgent.serve()</code>, everything else gets forwarded to the
+			matching DO via <code>getAgentByName</code>.
+		</p>
+
+		<h3>
+			<code>.ayjnt/dist/wrangler.jsonc</code> <span class="tag">gitignored</span>
+		</h3>
+		<p>
+			The wrangler config ayjnt hands to the CLI. DO bindings, migrations,
+			compatibility flags, and (when you have <code>app.tsx</code> files)
+			the Assets binding are all filled in automatically.
+		</p>
+
+		<h3>
+			<code>.ayjnt/env.d.ts</code> <span class="tag">gitignored</span>
+		</h3>
+		<p>
+			Declares the <code>GeneratedEnv</code> type with every DO binding
+			pointed at its specific agent class. Import it when you write an
+			agent: <code>import type {"{"} GeneratedEnv {"}"} from "@ayjnt/env"</code>.
+			Extend it with any extra bindings you declare in wrangler.
+		</p>
+
+		<h3>
+			<code>.ayjnt/tsconfig.json</code> <span class="tag">gitignored</span>
+		</h3>
+		<p>
+			Declares the <code>@ayjnt/*</code> path aliases the generated hooks
+			live under. Your own <code>tsconfig.json</code> can either inline the
+			paths (what <code>ayjnt new</code> does) or extend this file via{" "}
+			<code>"extends": "./.ayjnt/tsconfig.json"</code>.
+		</p>
+
+		<h3>
+			<code>.ayjnt/client/&lt;route&gt;/index.tsx</code>{" "}
+			<span class="tag">gitignored</span>
+		</h3>
+		<p>
+			One file per agent. Contains the typed <code>useAgent()</code> hook,
+			bound to that agent's class and route prefix. Users import from{" "}
+			<code>@ayjnt/&lt;route&gt;</code>, which resolves here via the path
+			alias. Regenerated on every build.
+		</p>
+
+		<h3>
+			<code>.ayjnt/assets/__ayjnt/&lt;route&gt;/*</code>{" "}
+			<span class="tag">gitignored</span>
+		</h3>
+		<p>
+			Only exists when at least one agent has an <code>app.tsx</code>. Contains
+			the bundled JS and HTML shell for each UI. Cloudflare Assets serves
+			these as static files; the <code>__ayjnt</code> prefix keeps them out
+			of the user's route namespace.
+		</p>
+
+		<h2>The gitignore</h2>
+		<p>
+			The <code>ayjnt new</code> template writes this <code>.gitignore</code>{" "}
+			rule which captures the whole contract in two lines:
+		</p>
+		<CodeBlock
+			filename=".gitignore"
+			lang="sh"
+			code={`.ayjnt/*
+!.ayjnt/migrations.json`}
+			highlightLines={[1, 2]}
+		/>
+		<p>
+			Ignore everything in <code>.ayjnt/</code>{" "}
+			<em>except</em> <code>migrations.json</code>. Every other file
+			regenerates on the next <code>ayjnt build</code>, so tracking them
+			just generates noise in code review.
+		</p>
+
+		<Callout kind="tip" title="Safe to wipe">
+			If you ever suspect the generated tree is stale (after a rebase,
+			switching branches, or just debugging), <code>rm -rf .ayjnt/dist
+			.ayjnt/client .ayjnt/tsconfig.json .ayjnt/env.d.ts .ayjnt/assets</code>{" "}
+			is always safe. The next <code>ayjnt dev</code> or{" "}
+			<code>ayjnt build</code> regenerates everything.
+		</Callout>
+	</DocPageShell>
+</DocsLayout>

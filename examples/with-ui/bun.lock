@@ -13,7 +13,7 @@
         "@types/bun": "latest",
         "@types/react": "^19",
         "@types/react-dom": "^19",
-        "ayjnt": "file:../..",
+        "ayjnt": "0.1.0",
         "wrangler": "4.82.1",
       },
     },
@@ -309,7 +309,7 @@
 
     "argparse": ["argparse@2.0.1", "", {}, "sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q=="],
 
-    "ayjnt": ["ayjnt@file:../..", { "dependencies": { "agents": "0.10.2", "wrangler": "4.82.1" }, "devDependencies": { "@cloudflare/workers-types": "4.20260413.1", "@types/bun": "latest" }, "bin": { "ayjnt": "./bin/ayjnt.ts" } }],
+    "ayjnt": ["ayjnt@0.1.0", "", { "dependencies": { "agents": "0.10.2", "wrangler": "4.82.1" }, "bin": { "ayjnt": "dist/ayjnt.js" } }, "sha512-kPaCy6U6YETJ7riyR8UpA+slc4uuO4pyaVrV4S2Jn/b5twI+mEp8JvQajiV+M11y9juWicDs7NVmaVr0USieGg=="],
 
     "baseline-browser-mapping": ["baseline-browser-mapping@2.10.18", "", { "bin": { "baseline-browser-mapping": "dist/cli.cjs" } }, "sha512-VSnGQAOLtP5mib/DPyg2/t+Tlv65NTBz83BJBJvmLVHHuKJVaDOBvJJykiT5TR++em5nfAySPccDZDa4oSrn8A=="],
 

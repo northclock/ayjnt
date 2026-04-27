@@ -1,0 +1,27 @@
+---
+/**
+ * ASCII / textual "what the app should look like" mockup. Used at the end
+ * of each example walkthrough on /examples/<slug>. Not an image — we want
+ * the mockup to render the same regardless of viewport, and SSG-friendly.
+ */
+type Props = {
+	content: string;
+	label?: string;
+	class?: string;
+};
+const { content, label, class: className = "" } = Astro.props;
+---
+<div class={`card overflow-hidden ${className}`}>
+	{label && (
+		<div class="flex items-center justify-between border-b border-[var(--ink)] bg-[var(--paper-edge)] px-3 py-1.5 font-mono text-xs">
+			<span class="text-[var(--ink)]">{label}</span>
+			<span class="uppercase tracking-widest text-[var(--ink-muted)]">
+				result
+			</span>
+		</div>
+	)}
+	<pre
+		class="overflow-x-auto bg-[var(--ink)] p-4 font-mono text-[11px] leading-[1.55] text-[var(--paper)]"
+		style="tab-size: 2"
+	><code>{content}</code></pre>
+</div>

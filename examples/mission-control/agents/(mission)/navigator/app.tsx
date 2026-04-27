@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { useEffect, useRef } from "react";
 import { useAgent } from "@ayjnt/navigator";
 
@@ -6,7 +5,7 @@ const W = 480;
 const H = 320;
 const SCALE = 3; // sector units → pixels
 
-function Navigator() {
+export default function Navigator() {
   const agent = useAgent();
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const state = agent.state;
@@ -175,6 +174,3 @@ const styles = {
   },
   readoutValue: { fontSize: 14, color: "#22c55e", marginTop: 4 },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Navigator />);

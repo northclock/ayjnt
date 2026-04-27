@@ -1,0 +1,22 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import { DocsSidebar } from "@/components/react/DocsSidebar.tsx";
+
+type Props = {
+	title?: string;
+	description?: string;
+};
+
+const currentPath = Astro.url.pathname;
+const { title, description } = Astro.props;
+---
+<BaseLayout title={title} description={description}>
+	<div class="mx-auto grid max-w-[1320px] grid-cols-1 md:grid-cols-[260px_1fr]">
+		<aside class="border-b border-[var(--ink)] md:border-b-0">
+			<DocsSidebar currentPath={currentPath} />
+		</aside>
+		<div class="min-w-0 px-6 py-12 md:px-12 md:py-14 lg:px-16">
+			<slot />
+		</div>
+	</div>
+</BaseLayout>

@@ -1,9 +1,8 @@
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/engineer";
 
 const SYSTEMS = ["power", "lifeSupport", "comms", "hull", "drill"] as const;
 
-function Engineer() {
+export default function Engineer() {
   const agent = useAgent();
   const state = agent.state;
 
@@ -182,6 +181,3 @@ const styles = {
     fontSize: 11,
   },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Engineer />);

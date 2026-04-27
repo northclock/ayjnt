@@ -1,0 +1,46 @@
+---
+type Variant = "primary" | "secondary" | "ghost";
+
+const variants: Record<Variant, string> = {
+	primary:
+		"bg-[var(--ink)] text-[var(--paper)] border-[var(--ink)] hover:-translate-y-0.5 hover:-translate-x-0.5 hover:shadow-[4px_4px_0_var(--amber)]",
+	secondary:
+		"bg-[var(--paper)] text-[var(--ink)] border-[var(--ink)] hover:-translate-y-0.5 hover:-translate-x-0.5 hover:shadow-[4px_4px_0_var(--ink)]",
+	ghost:
+		"bg-transparent text-[var(--ink)] border-transparent hover:bg-[var(--paper-edge)]",
+};
+
+type Props = {
+	variant?: Variant;
+	class?: string;
+	/** When present, renders an anchor instead of a button. */
+	href?: string;
+	/** Force external link treatment (target=_blank). Inferred for http* URLs. */
+	external?: boolean;
+};
+
+const {
+	variant = "primary",
+	class: className = "",
+	href,
+	external = false,
+} = Astro.props;
+
+const common = `inline-flex items-center gap-2 border-2 px-4 py-2 font-mono text-sm transition-all duration-150 ${variants[variant]} ${className}`;
+const isExternal = external || (href && href.startsWith("http"));
+---
+{href ? (
+	isExternal ? (
+		<a href={href} target="_blank" rel="noreferrer" class={common}>
+			<slot />
+		</a>
+	) : (
+		<a href={href} class={common}>
+			<slot />
+		</a>
+	)
+) : (
+	<button class={common}>
+		<slot />
+	</button>
+)}

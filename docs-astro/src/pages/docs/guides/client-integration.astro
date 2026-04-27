@@ -1,0 +1,231 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+
+// Hoisted to consts so the embedded backtick/dollar-brace sequences
+// don't confuse Astro's JSX-expression parser.
+const workingClientScript = `import { agentFetch } from "agents/client";
+
+const host = process.env.HOST ?? "http://localhost:8787";
+const roomId = "demo-room";
+
+// POST a message
+const post = await agentFetch(
+  {
+    agent: "ChatAgent",                 // required by SDK typing, ignored here
+    basePath: \`chat/\${roomId}\`,         // owns the URL
+    host,
+  },
+  {
+    method: "POST",
+    body: JSON.stringify({ text: "hello from the client" }),
+  },
+);
+console.log("POST:", post.status, await post.json());
+
+// GET the current state
+const get = await agentFetch({
+  agent: "ChatAgent",
+  basePath: \`chat/\${roomId}\`,
+  host,
+});
+console.log("GET:", await get.json());`;
+
+const chatComponentCode = `import { useAgent } from "agents/react";
+
+export function Chat({ roomId }: { roomId: string }) {
+  const agent = useAgent<ChatState>({
+    agent: "ChatAgent",
+    basePath: \`chat/\${roomId}\`,
+  });
+  // ...
+}`;
+---
+<DocsLayout
+	title="Client integration — ayjnt docs"
+	description="How to talk to ayjnt agents from the Cloudflare Agents client SDK. Includes the most important gotcha in the whole framework: path vs basePath."
+>
+	<DocPageShell
+		slug="guides/client-integration"
+		lede="ayjnt's URL shape is different from the Agents SDK's default. That means one option on the client matters: basePath, not path."
+	>
+		<h2>The default SDK URL shape</h2>
+		<p>
+			The Cloudflare Agents client SDK (<code>useAgent</code>,{" "}
+			<code>AgentClient</code>, <code>agentFetch</code>) constructs URLs
+			like this:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`wss://your-worker.workers.dev/agents/<kebab-class-name>/<instance>
+
+# e.g., for a class ChatAgent with instance name "room-42":
+wss://your-worker.workers.dev/agents/chat-agent/room-42`}
+		/>
+		<p>
+			The <code>/agents/</code> prefix is hardcoded. The class name is
+			kebab-cased. The last segment is the instance.
+		</p>
+
+		<h2>The ayjnt URL shape</h2>
+		<p>
+			ayjnt doesn't use that shape. A <code>ChatAgent</code> in{" "}
+			<code>agents/chat/</code> lives at <code>/chat/&lt;instance&gt;</code>,
+			not <code>/agents/chat-agent/&lt;instance&gt;</code>. Which means
+			the default SDK URL <em>doesn't match any route in our worker</em>.
+			You'll get a 404.
+		</p>
+
+		<h2>The fix: basePath</h2>
+		<p>
+			The SDK has a <code>basePath</code> option that overrides the default
+			URL construction entirely:
+		</p>
+		<CodeBlock
+			lang="ts"
+			code={`import { useAgent } from "agents/react";
+
+// WRONG — uses default /agents/chat-agent/<name> URL, gets 404
+const agent = useAgent({ agent: "ChatAgent", name: "room-42" });
+
+// RIGHT — basePath replaces the entire URL prefix
+const agent = useAgent({
+  agent: "ChatAgent",
+  basePath: "chat/room-42",   // → wss://host/chat/room-42
+});`}
+		/>
+		<p>
+			Same for <code>agentFetch</code> and <code>AgentClient</code>. The{" "}
+			<code>agent</code> field is still required by the SDK typing, but
+			it's ignored when <code>basePath</code> is set — pass the class
+			name anyway so TypeScript stays happy.
+		</p>
+
+		<Callout kind="warn" title="basePath, not path">
+			<p>
+				There's also a <code>path</code> option. It doesn't do
+				what you want. <code>path</code> is <em>appended</em> to the
+				default URL (<code>/agents/chat-agent/room-42/&lt;your-path&gt;</code>),
+				not substituted for the prefix. <code>basePath</code> is the one
+				that replaces everything.
+			</p>
+			<p>
+				From the SDK's own docstring:{" "}
+				<em>
+					“Full URL path — bypasses agent/name URL construction.
+					When set, the client connects to this path directly. Server
+					must handle routing manually.”
+				</em>{" "}
+				That's exactly what ayjnt does on the server side.
+			</p>
+		</Callout>
+
+		<h2>A working client script</h2>
+		<p>
+			This is from <code>examples/with-client/client.ts</code>:
+		</p>
+		<CodeBlock
+			filename="client.ts"
+			lang="ts"
+			code={workingClientScript}
+			highlightLines={[10, 22]}
+		/>
+
+		<h2>From a React app</h2>
+		<p>
+			In the browser, use <code>useAgent</code> from{" "}
+			<code>agents/react</code>. ayjnt already generates a typed wrapper
+			for every agent (see{" "}
+			<a href="/docs/guides/co-located-ui" class="link-underline">
+				Co-located UI
+			</a>
+			), so if your UI lives in <code>app.tsx</code> next to the agent,
+			you can import the typed hook directly:
+		</p>
+		<CodeBlock
+			lang="tsx"
+			code={`// agents/chat/app.tsx
+import { useAgent } from "@ayjnt/chat";   // generated hook — basePath already wired
+
+export function Chat() {
+  const agent = useAgent();   // no args — basePath derived from URL
+  // ...
+}`}
+		/>
+		<p>
+			If your UI is in a separate app (Next.js, Vite) and you want to
+			point at the agent directly, use the raw SDK with{" "}
+			<code>basePath</code>:
+		</p>
+		<CodeBlock
+			lang="tsx"
+			code={chatComponentCode}
+		/>
+
+		<h2>Why the server uses getAgentByName</h2>
+		<p>
+			A side note that matters if you're ever debugging identity
+			issues:
+		</p>
+		<p>
+			When a client connects via the SDK, the server sends back a{" "}
+			<code>CF_AGENT_IDENTITY</code> message containing{" "}
+			<code>{`{ name: this.name, agent: kebab(ClassName) }`}</code>. The
+			client uses this to know which instance it's talking to.
+		</p>
+		<p>
+			For <code>this.name</code> on the DO to be populated, the server
+			must call <code>stub.setName(name)</code> before the request reaches
+			the agent. ayjnt's generated dispatch calls{" "}
+			<code>getAgentByName(env.BINDING, instanceId)</code>, which does{" "}
+			<code>idFromName</code> + <code>get</code> + <code>setName</code>{" "}
+			internally. If you were hand-rolling your own dispatch and did{" "}
+			<code>namespace.idFromName(id)</code> + <code>namespace.get(id)</code>{" "}
+			+ <code>stub.fetch(...)</code> manually, you'd skip{" "}
+			<code>setName</code> and every identity message would carry an
+			empty name. Symptoms: the client's <code>onIdentity</code>{" "}
+			callback fires with bad data, <code>useAgent</code>'s{" "}
+			<code>agent.name</code> is undefined.
+		</p>
+		<p>ayjnt handles this correctly out of the box. You just need to know that if you ever build your own worker entry around the same pattern, <code>getAgentByName</code> is the right primitive.</p>
+
+		<h2>CORS</h2>
+		<p>
+			If your client is on a different origin from the worker,
+			you'll need CORS. There's no built-in CORS in ayjnt —
+			write a middleware. See the CORS pattern in the{" "}
+			<a href="/docs/guides/middleware#common-patterns" class="link-underline">
+				Middleware guide
+			</a>
+			.
+		</p>
+
+		<h2>WebSocket vs HTTP on the same URL</h2>
+		<p>
+			The ayjnt worker serves three different things off the same URL
+			depending on the request shape:
+		</p>
+		<ul>
+			<li>
+				<code>GET</code> with <code>Upgrade: websocket</code> → agent's
+				WebSocket handler (this is what <code>useAgent</code> uses)
+			</li>
+			<li>
+				<code>GET</code> with <code>Accept: text/html</code> → HTML shell
+				(if the agent has <code>app.tsx</code>)
+			</li>
+			<li>
+				Anything else → agent's <code>onRequest</code>
+			</li>
+		</ul>
+		<p>
+			So <code>useAgent</code> (WebSocket) and{" "}
+			<code>agentFetch(method: 'POST')</code> (HTTP) can coexist
+			pointing at the same URL; they hit different code paths on the
+			server. The choice between them is a question of whether you need
+			realtime state sync (WebSocket) or fire-and-forget (HTTP).
+		</p>
+	</DocPageShell>
+</DocsLayout>

@@ -1,0 +1,19 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ *
+ * This project is a static Astro build served through Workers Assets.
+ * No `main` is set — there is no Worker script, wrangler serves ./dist directly.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ayjnt-docs",
+  "compatibility_date": "2026-04-15",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

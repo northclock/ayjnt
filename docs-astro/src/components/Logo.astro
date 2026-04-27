@@ -1,0 +1,19 @@
+---
+// The ayjnt wordmark. The two-letter mark reads "aj" — phonetically
+// "ayjnt" stripped of its vowels, matching the package name's
+// consonant-only naming.
+type Props = {
+	class?: string;
+	showWordmark?: boolean;
+};
+const { class: className = "", showWordmark = true } = Astro.props;
+---
+<span class={`inline-flex items-center gap-2 font-mono font-semibold ${className}`}>
+	<span
+		class="inline-flex h-7 w-7 items-center justify-center border-2 border-current text-sm"
+		aria-hidden="true"
+	>
+		aj
+	</span>
+	{showWordmark && <span class="text-base tracking-tight">/AYjnt/</span>}
+</span>

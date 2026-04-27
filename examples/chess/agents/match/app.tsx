@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import { useAgent } from "@ayjnt/match";
 
@@ -18,7 +17,7 @@ function pickName(): string {
   return trimmed;
 }
 
-function Match() {
+export default function Match() {
   const [name] = useState(pickName);
   const [selected, setSelected] = useState<number | null>(null);
   const agent = useAgent();
@@ -252,6 +251,3 @@ const styles = {
     color: "#666",
   },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Match />);

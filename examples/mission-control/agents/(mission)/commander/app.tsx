@@ -1,7 +1,6 @@
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/commander";
 
-function Commander() {
+export default function Commander() {
   const agent = useAgent();
   const state = agent.state;
   const missionId = agent.name;
@@ -249,6 +248,3 @@ const styles = {
   },
   time: { color: "#9ca3af", minWidth: 80 },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Commander />);
