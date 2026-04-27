@@ -211,6 +211,12 @@ const CATALOG_PATH = "/__ayjnt/catalog";
  *  that users can't name a DO instance \`docs\` — documented restriction. */
 const DOCS_SEGMENT = "docs";
 
+/** Instance name used when the URL has no instance segment — \`/<route>\` and
+ *  \`/<route>/\` both resolve to this. Mirrors the client-side \`useAgent\`
+ *  hook (see deriveInstance in src/codegen/client.ts), so the bundled UI
+ *  ends up talking to the same Durable Object the worker dispatches to. */
+const DEFAULT_INSTANCE = "default";
+
 type Match =
   | {
       kind: "agent";
@@ -264,8 +270,10 @@ function matchRoute(pathname: string): Match | null {
           assetFlat: route.assetFlat,
         };
       }
-      const instanceId = parts[0];
-      if (!instanceId) return null;
+      // No instance segment? Default to "default". \`/counter\` and
+      // \`/counter/\` both resolve to the same DO as \`/counter/default\`,
+      // matching what the bundled \`useAgent()\` hook derives client-side.
+      const instanceId = parts[0] ?? DEFAULT_INSTANCE;
       const rest = "/" + parts.slice(1).join("/");
       return {
         kind: "agent",

@@ -18,7 +18,7 @@ import CodeBlock from "@/components/CodeBlock.astro";
 		</p>
 		<CodeBlock
 			lang="sh"
-			code={`/<route-path>/<instanceId>[/<path-suffix>]`}
+			code={`/<route-path>[/<instanceId>][/<path-suffix>]`}
 		/>
 		<ul>
 			<li>
@@ -30,7 +30,13 @@ import CodeBlock from "@/components/CodeBlock.astro";
 				<code>&lt;instanceId&gt;</code> — the first path segment after the
 				route prefix. Selects which DO instance handles the request. Any
 				string is fine; the SDK calls <code>stub.idFromName(instanceId)</code>{" "}
-				under the hood.
+				under the hood. <strong>Optional</strong> — when omitted (e.g.{" "}
+				<code>/chat</code> or <code>/chat/</code>), the worker dispatches
+				to instance <code>"default"</code>. The bundled{" "}
+				<code>useAgent()</code> hook applies the same fallback
+				client-side, so a browser visit to <code>/chat</code> renders the
+				UI and connects it to the same DO that <code>/chat/default</code>{" "}
+				would.
 			</li>
 			<li>
 				<code>&lt;path-suffix&gt;</code> — everything after the instance

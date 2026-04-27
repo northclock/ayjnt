@@ -58,8 +58,9 @@ const fileTreeRoot = [
 				name: "chat",
 				defaultOpen: true,
 				children: [
-					{ type: "file" as const, name: "agent.ts", kind: "ts" as const, note: "state + methods" },
+					{ type: "file" as const, name: "agent.ts", kind: "ts" as const, note: "state + @callable" },
 					{ type: "file" as const, name: "app.tsx", kind: "tsx" as const, note: "React UI" },
+					{ type: "file" as const, name: "docs.md", kind: "md" as const, note: "served at /chat/docs" },
 				],
 			},
 			{
@@ -193,9 +194,25 @@ const interAgentFacts: Array<[string, string]> = [
 							</dd>
 						</div>
 						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">docs.md</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								Optional markdown. Embedded into the worker, served at{" "}
+								<code class="font-mono">/&lt;route&gt;/docs</code> through
+								the same middleware chain that gates the agent.
+							</dd>
+						</div>
+						<div>
 							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">(parens)</dt>
 							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
 								Route groups — share middleware without nesting the URL.
+							</dd>
+						</div>
+						<div>
+							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">/__ayjnt/catalog</dt>
+							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
+								Built-in JSON endpoint. Lists every agent the caller can
+								reach with its <code class="font-mono">@callable</code>{" "}
+								methods — filtered by middleware on every request.
 							</dd>
 						</div>
 					</dl>

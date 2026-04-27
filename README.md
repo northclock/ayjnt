@@ -167,7 +167,9 @@ function Counter() {
 createRoot(document.getElementById("root")!).render(<Counter />);
 ```
 
-`ayjnt build` bundles this with Bun (target: browser), inlines it into an HTML shell, and the worker serves it at `GET /counter/:id` when the request has `Accept: text/html`. WebSocket upgrades and API calls to the same URL still route to the agent, so one URL serves both the UI and its data.
+`ayjnt build` bundles this with Bun (target: browser), inlines it into an HTML shell, and the worker serves it at `GET /counter` (default instance) or `GET /counter/<instance>` when the request has `Accept: text/html`. WebSocket upgrades and API calls to the same URL still route to the agent, so one URL serves both the UI and its data.
+
+Visiting `/counter` with no instance segment is shorthand for `/counter/default` — both server-side dispatch and the bundled `useAgent()` hook agree on the `"default"` fallback so the UI ends up bound to the same Durable Object.
 
 ### The generated pieces
 
@@ -209,7 +211,7 @@ Run `ayjnt build` at least once first so the file exists.
 
 ### HTML vs agent on the same URL
 
-`/counter/:id` serves two different things depending on how you ask for it:
+`/counter` (default instance) and `/counter/:id` (explicit instance) each serve two different things depending on how you ask for them:
 
 | Request shape | Response |
 |---|---|

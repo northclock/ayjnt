@@ -176,7 +176,22 @@ body {
 	background: var(--ink-muted);
 }
 
-/* shiki prose overrides — keep our tokens, drop the library's background. */
+/* shiki prose overrides — keep our tokens, drop the library's background.
+ *
+ * Shiki is configured with dual themes (github-light + github-dark) and
+ * `defaultColor: false`, which means it emits a `--shiki-light` /
+ * `--shiki-dark` CSS variable on every span but never sets `color`
+ * itself. Without this block the tokens fall back to the parent text
+ * colour and the whole block reads as black/white prose.
+ *
+ * The :where(...) selectors below map the variables to `color` for the
+ * active scheme. Background colours are intentionally NOT applied to
+ * spans because each line is highlighted as a row (.line.highlighted).
+ */
+pre.shiki,
+pre.shiki span {
+	color: var(--shiki-light);
+}
 pre.shiki {
 	background: transparent !important;
 	padding: 1rem;
@@ -193,6 +208,13 @@ pre.shiki .line.highlighted {
 	margin: 0 -1rem;
 	padding: 0 1rem;
 	box-shadow: inset 2px 0 0 var(--amber);
+}
+
+@media (prefers-color-scheme: dark) {
+	pre.shiki,
+	pre.shiki span {
+		color: var(--shiki-dark);
+	}
 }
 
 /* Shared large section heading — amber ruler + confident title. */

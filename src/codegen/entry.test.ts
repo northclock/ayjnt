@@ -285,6 +285,22 @@ describe("generateEntry", () => {
     expect(out).toContain('"returnType":"Promise<number>"');
   });
 
+  test("bare route falls back to instance \"default\"", () => {
+    // /counter (no instance) and /counter/ (trailing slash) must resolve to
+    // the same DO as /counter/default. Mirrors the client-side useAgent()
+    // hook's deriveInstance() so the bundled UI talks to the same instance
+    // the worker dispatches to.
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).toContain('DEFAULT_INSTANCE = "default"');
+    expect(out).toContain("parts[0] ?? DEFAULT_INSTANCE");
+    // The historic null-return path that produced 404 for missing instance
+    // is gone — there should be no remaining `if (!instanceId) return null`
+    // construction in the generated matcher.
+    expect(out).not.toContain("if (!instanceId) return null;");
+  });
+
   test("catalog: reserved path + middleware probe", () => {
     const out = generateEntry(mf([agent({})]), {
       outPath: "/fake/.ayjnt/dist/entry.ts",
