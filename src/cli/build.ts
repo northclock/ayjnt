@@ -215,11 +215,16 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   );
 
   const name = await resolveWorkerName(cwd);
+  // AYJNT_COMPATIBILITY_DATE lets users override the framework's pinned
+  // default without forking — useful when they upgrade their wrangler
+  // independently of ayjnt and want to opt into newer runtime behaviour.
+  const compatibilityDate = process.env["AYJNT_COMPATIBILITY_DATE"];
   await Bun.write(
     wranglerPath,
     generateWrangler(manifest, finalLock, {
       name,
       hasApps: appCount > 0,
+      ...(compatibilityDate ? { compatibilityDate } : {}),
     }),
   );
 

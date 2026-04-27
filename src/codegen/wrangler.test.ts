@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentEntry, Manifest, MigrationLockfile } from "../core/types.ts";
-import { deriveWorkerName, generateWrangler } from "./wrangler.ts";
+import {
+  DEFAULT_COMPATIBILITY_DATE,
+  deriveWorkerName,
+  generateWrangler,
+} from "./wrangler.ts";
 
 function mf(agents: AgentEntry[]): Manifest {
   return { root: "/fake", agents };
@@ -74,6 +78,17 @@ describe("generateWrangler", () => {
       "nodejs_compat",
       "streams_enable_constructors",
     ]);
+  });
+
+  test("compatibility_date defaults to the pinned constant, not today's date", () => {
+    // Pinned (not clock-derived) so identical sources always produce
+    // identical wrangler.jsonc, and so generated dates never outrun
+    // the workerd binary that ships with the framework's wrangler dep.
+    const out = generateWrangler(mf([agent({})]), lockfile, { name: "app" });
+    const cfg = parse(out);
+    expect(cfg["compatibility_date"]).toBe(DEFAULT_COMPATIBILITY_DATE);
+    // Sanity: the constant itself looks like a YYYY-MM-DD.
+    expect(DEFAULT_COMPATIBILITY_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test("rejects invalid worker name", () => {
