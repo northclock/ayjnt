@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-27T06:14:30.813Z",
+      "new_sqlite_classes": [
+        "HeartbeatAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "heartbeat": {
+      "agentId": "heartbeat",
+      "className": "HeartbeatAgent",
+      "firstTag": "v1"
+    }
+  }
+}

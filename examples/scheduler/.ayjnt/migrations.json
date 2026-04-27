@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-04-27T06:16:19.130Z",
+      "new_sqlite_classes": [
+        "CarbonAgent",
+        "RemindersAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "carbon": {
+      "agentId": "carbon",
+      "className": "CarbonAgent",
+      "firstTag": "v1"
+    },
+    "reminders": {
+      "agentId": "reminders",
+      "className": "RemindersAgent",
+      "firstTag": "v1"
+    }
+  }
+}

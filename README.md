@@ -40,7 +40,7 @@ bun run dev
 
 The blank starter gives you a single agent at `/alive/:instance-id` that responds `{"status":"alive","message":"I'm alive"}` — the minimum that proves routing, DO binding, and state wiring all work. Every example in `/examples` starts from this scaffold and replaces `agents/alive` with its own agents.
 
-Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/catalog`](./examples/catalog) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
+Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/catalog`](./examples/catalog) · [`examples/scheduler`](./examples/scheduler) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
 
 ## File conventions
 

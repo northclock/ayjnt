@@ -1752,6 +1752,315 @@ export default function Heartbeat() {
 		],
 	},
 
+	// --- scheduler ---------------------------------------------------------
+	{
+		slug: "scheduler",
+		title: "Scheduler showcase — carbon poller + reminders",
+		description:
+			"Two agents in one project: one polls the UK National Grid carbon-intensity API every minute via scheduleEvery(), the other accepts user-set reminders via schedule() and fires a system Notification when the time arrives. Demonstrates recurring + one-shot scheduling side by side.",
+		tags: ["scheduling", "recurring", "fetch", "ui", "notifications"],
+		status: "stable",
+		exampleDir: "examples/scheduler",
+		preview: {
+			kind: "ui",
+			caption: "current: 187 gCO₂/kWh — moderate · 4 reminders pending",
+		},
+		whatYoullLearn: [
+			"How `scheduleEvery(seconds, \"method\")` installs a recurring DO alarm",
+			"How `schedule(date, \"method\", payload)` installs a one-shot DO alarm",
+			"How a recurring agent calls an external API and broadcasts results to the UI via setState",
+			"How to wire `agent.state.fired` to the browser Notification API for system-level alerts",
+			"How recurring + one-shot schedules survive worker restarts (alarms are persisted on the DO)",
+		],
+		steps: [
+			SCAFFOLD_WITH_UI,
+			{
+				title: "Two agents, two schedule patterns",
+				blurb:
+					"Each folder is its own DO-backed agent. `carbon` self-drives on a recurring cadence (`scheduleEvery`); `reminders` schedules one-shot work in response to user input (`schedule`). Both ship a co-located `app.tsx`.",
+				terminal: [
+					{ kind: "command", text: "rm -rf agents/counter" },
+					{ kind: "command", text: "mkdir -p agents/carbon agents/reminders" },
+				],
+				treeTitle: "my-app/agents/",
+				tree: [
+					{
+						type: "folder",
+						name: "carbon",
+						defaultOpen: true,
+						highlight: true,
+						children: [
+							{ type: "file", name: "agent.ts", kind: "ts", note: "scheduleEvery → fetch" },
+							{ type: "file", name: "app.tsx", kind: "tsx", note: "live bar chart" },
+							{ type: "file", name: "docs.md", kind: "md" },
+						],
+					},
+					{
+						type: "folder",
+						name: "reminders",
+						defaultOpen: true,
+						highlight: true,
+						children: [
+							{ type: "file", name: "agent.ts", kind: "ts", note: "schedule → fire" },
+							{ type: "file", name: "app.tsx", kind: "tsx", note: "Notification API" },
+							{ type: "file", name: "docs.md", kind: "md" },
+						],
+					},
+				],
+			},
+			{
+				title: "CarbonAgent — recurring schedule + external fetch",
+				blurb:
+					"`startPolling` cancels any existing schedule, fires one immediate tick (so the UI doesn't sit empty for a full interval), then installs a recurring schedule via `scheduleEvery(intervalSeconds, \"tick\")`. The framework writes the alarm to DO storage so it survives worker restarts.",
+				files: [
+					{
+						path: "agents/carbon/agent.ts",
+						lang: "ts",
+						code: `import { Agent } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Sample = {
+  fetchedAt: number;
+  from: string; to: string;
+  forecast: number;
+  actual: number | null;
+  index: string;
+};
+
+type State = {
+  intervalSeconds: number;
+  scheduleId: string | null;
+  current: Sample | null;
+  history: Sample[];
+  error: string | null;
+};
+
+const CARBON_URL = "https://api.carbonintensity.org.uk/intensity";
+const MAX_HISTORY = 60;
+
+export default class CarbonAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = {
+    intervalSeconds: 0, scheduleId: null,
+    current: null, history: [], error: null,
+  };
+
+  /** Recurring callback. Errors are stashed in state, not re-thrown. */
+  async tick(): Promise<void> {
+    try {
+      const res = await fetch(CARBON_URL, { headers: { accept: "application/json" } });
+      const body = await res.json() as { data: { from: string; to: string;
+        intensity: { forecast: number; actual: number | null; index: string } }[] };
+      const row = body.data[0]!;
+      const sample: Sample = {
+        fetchedAt: Date.now(),
+        from: row.from, to: row.to,
+        forecast: row.intensity.forecast,
+        actual: row.intensity.actual,
+        index: row.intensity.index,
+      };
+      this.setState({
+        ...this.state,
+        current: sample,
+        history: [sample, ...this.state.history].slice(0, MAX_HISTORY),
+        error: null,
+      });
+    } catch (err) {
+      this.setState({ ...this.state, error: String(err) });
+    }
+  }
+
+  async startPolling(intervalSeconds: number) {
+    await this.stopPolling();
+    await this.tick();                                          // fire once now
+    const schedule = await this.scheduleEvery(intervalSeconds, "tick");
+    this.setState({ ...this.state, intervalSeconds, scheduleId: schedule.id });
+  }
+
+  async stopPolling(): Promise<void> {
+    if (this.state.scheduleId) {
+      try { await this.cancelSchedule(this.state.scheduleId); } catch {}
+    }
+    this.setState({ ...this.state, intervalSeconds: 0, scheduleId: null });
+  }
+
+  override async onRequest(request: Request): Promise<Response> {
+    if (request.method === "POST") {
+      const body = await request.json() as { intervalSeconds?: number; stop?: boolean };
+      if (body.stop) { await this.stopPolling(); return Response.json({ ok: true }); }
+      await this.startPolling(body.intervalSeconds ?? 60);
+      return Response.json({ ok: true, intervalSeconds: body.intervalSeconds ?? 60 });
+    }
+    return Response.json({ instance: this.name, ...this.state });
+  }
+}`,
+						highlightLines: [33, 49, 57, 58, 60, 61, 62, 63],
+					},
+				],
+			},
+			{
+				title: "RemindersAgent — one-shot schedule + persisted payload",
+				blurb:
+					"`this.schedule(due, \"fire\", payload)` registers a DO alarm for a specific moment in time and stores the payload alongside it. When the alarm fires, the framework calls `fire(payload)` and we move the reminder from `pending` to `fired`. Cancellation looks up the schedule by payload id via `getSchedules()`.",
+				files: [
+					{
+						path: "agents/reminders/agent.ts",
+						lang: "ts",
+						code: `import { Agent } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Reminder = {
+  id: string; text: string;
+  createdAt: number; due: number;
+  firedAt?: number;
+};
+
+type State = { pending: Reminder[]; fired: Reminder[] };
+
+export default class RemindersAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = { pending: [], fired: [] };
+
+  /** Scheduler callback — runs at the scheduled \`due\` instant. */
+  async fire(reminder: Reminder): Promise<void> {
+    this.setState({
+      pending: this.state.pending.filter((r) => r.id !== reminder.id),
+      fired: [{ ...reminder, firedAt: Date.now() }, ...this.state.fired].slice(0, 50),
+    });
+  }
+
+  async createReminder(text: string, inSeconds: number): Promise<Reminder> {
+    const due = new Date(Date.now() + inSeconds * 1000);
+    const reminder: Reminder = {
+      id: crypto.randomUUID(), text,
+      createdAt: Date.now(), due: due.getTime(),
+    };
+    await this.schedule(due, "fire", reminder);                 // ← one-shot
+    this.setState({
+      pending: [...this.state.pending, reminder],
+      fired: this.state.fired,
+    });
+    return reminder;
+  }
+
+  async cancelReminder(id: string) {
+    for (const s of this.getSchedules()) {
+      const payload = s.payload as unknown as Reminder | undefined;
+      if (payload?.id === id) await this.cancelSchedule(s.id).catch(() => {});
+    }
+    this.setState({
+      pending: this.state.pending.filter((r) => r.id !== id),
+      fired: this.state.fired,
+    });
+  }
+  /* ... onRequest dispatches POST/DELETE to the methods above ... */
+}`,
+						highlightLines: [15, 16, 28, 38, 39],
+					},
+				],
+			},
+			{
+				title: "Wire fired reminders to system Notifications",
+				blurb:
+					"The agent itself doesn't send push notifications — it persists the fired reminder and broadcasts the state change. The UI listens via `useAgent`, dedupes new entries against a `Set` of seen ids, and pops `new Notification(...)` for each new one. Works as long as the tab is open. (Real Web Push needs a service worker + VAPID — out of scope here, see `docs.md`.)",
+				files: [
+					{
+						path: "agents/reminders/app.tsx",
+						lang: "tsx",
+						code: `import { useEffect, useRef, useState } from "react";
+import { useAgent } from "@ayjnt/reminders";
+
+export default function RemindersApp() {
+  const agent = useAgent();
+  const fired = agent.state?.fired ?? [];
+  const [permission, setPermission] = useState(Notification.permission);
+
+  // Dedupe so React strict-mode double-effects don't fire twice.
+  const seen = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (permission !== "granted") return;
+    for (const r of fired) {
+      if (seen.current.has(r.id)) continue;
+      seen.current.add(r.id);
+      new Notification("Reminder", { body: r.text, tag: r.id });
+    }
+  }, [fired, permission]);
+
+  return (
+    <main>
+      {permission !== "granted" && (
+        <button onClick={async () => setPermission(await Notification.requestPermission())}>
+          allow notifications
+        </button>
+      )}
+      {/* ...form to set reminders + lists for pending/fired... */}
+    </main>
+  );
+}`,
+						highlightLines: [10, 12, 13, 14, 15, 16, 17, 18],
+					},
+				],
+			},
+			{
+				title: "Run it",
+				blurb:
+					"Open the carbon UI, click start, and the agent installs a recurring schedule that fetches the live UK grid sample every minute. Open the reminders UI, allow notifications, set a reminder for 30s — watch it move from pending to fired and pop a system notification.",
+				terminal: [
+					{ kind: "command", text: "bun install" },
+					{ kind: "command", text: "bun run dev" },
+					{ kind: "output", text: "✓ ayjnt: 2 agent(s), 2 with UI, 2 with docs → .ayjnt/dist/wrangler.jsonc" },
+					{ kind: "output", text: "⎔ Listening on http://localhost:8787" },
+					{ kind: "blank" },
+					{ kind: "command", text: "open http://localhost:8787/carbon/main" },
+					{ kind: "command", text: "open http://localhost:8787/reminders/me" },
+					{ kind: "blank" },
+					{ kind: "command", text: "# or set a reminder via curl" },
+					{
+						kind: "command",
+						text: "curl -X POST localhost:8787/reminders/me \\",
+					},
+					{
+						kind: "command",
+						text: "  -d '{\"text\":\"check the kettle\",\"in\":30}'",
+					},
+					{
+						kind: "success",
+						text: '{ "ok":true, "reminder":{ "id":"…", "text":"check the kettle", "due":… }, "msFromNow":30000 }',
+					},
+				],
+			},
+			{
+				title: "What it looks like",
+				blurb:
+					"Two agents, two scheduling patterns, one URL each. Both agents broadcast state changes to their UIs through the same `setState` → WebSocket pipe — the UI does no polling on its own.",
+				screenshot: {
+					label: "/carbon/main and /reminders/me side by side",
+					content: `┌─ /carbon/main ────────────────────────┐  ┌─ /reminders/me ──────────────────────┐
+│ UK Grid Carbon Intensity              │  │ Reminders                            │
+│                                       │  │                                      │
+│  ┌─────────────────────────────────┐  │  │ instance: me · 1 pending · 2 fired   │
+│  │ 187 gCO₂/kWh                    │  │  │                                      │
+│  │ MODERATE · forecast 187         │  │  │ [check the kettle____] [in 30s] [SET]│
+│  │ window 14:30 — 15:00            │  │  │                                      │
+│  │ fetched 12s ago                 │  │  │ pending                              │
+│  └─────────────────────────────────┘  │  │  ┌─ check the kettle  fires in 19s ┐ │
+│                                       │  │  │                          [cancel]│ │
+│ [start (60s)] [start (15s, demo)]     │  │  └────────────────────────────────┘  │
+│ [stop]        [clear history]         │  │                                      │
+│                                       │  │ fired (2)                            │
+│ forecast history (8 samples)          │  │  ┌─ take out the bins  just now    ┐ │
+│  ▁▂▃▃▄▅▅▆ █  ← bar chart, by index    │  │  └────────────────────────────────┘  │
+│                                       │  │  ┌─ stand up           5m ago      ┐ │
+│ 14:32:01  [moderate]  forecast 187    │  │  └────────────────────────────────┘  │
+│ 14:31:01  [moderate]  forecast 184    │  │                                      │
+│ 14:30:01  [low]       forecast 142    │  │  💬 OS notification: "Reminder —     │
+│ ...                                   │  │     take out the bins"               │
+└───────────────────────────────────────┘  └──────────────────────────────────────┘`,
+				},
+			},
+			deployStep("https://my-app.<account>.workers.dev"),
+		],
+	},
+
 	// --- chat-rooms --------------------------------------------------------
 	{
 		slug: "chat-rooms",
