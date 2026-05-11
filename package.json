@@ -1,6 +1,6 @@
 {
   "name": "ayjnt",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Agent-first framework for Cloudflare. No worker boilerplate, no wrangler wrestling.",
   "type": "module",
   "bin": {
