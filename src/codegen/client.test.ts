@@ -121,8 +121,30 @@ describe("generateClientHook", () => {
   test("state type inferred from agent class", () => {
     const out = generateClientHook(agent({}), "/fake/.ayjnt/client/chat/index.tsx");
     expect(out).toContain(
-      "type DefaultState = Instance extends { state: infer S } ? S : unknown;",
+      "type AgentState = Instance extends { state: infer S } ? S : unknown;",
     );
+  });
+
+  test("forwards Instance to upstream so .stub.method() is typed", () => {
+    // Cloudflare's useAgent has two overloads — the typed one is
+    //   useAgent<AgentT extends { get state(): State }, State>(options) → { stub: AgentStub<AgentT>, … }
+    // Our wrapper hardcodes BOTH generics — AgentT = Instance (the agent
+    // class) and State = AgentState (the inferred state shape). Without
+    // this, `agent.stub` falls back to UntypedAgentStub and @callable
+    // methods lose their signatures on the client.
+    //
+    // We deliberately don't expose State as a generic on the wrapper.
+    // Threading a user-provided State through the upstream constraint
+    // (`AgentT extends { get state(): State }`) ran into TS's "two
+    // different State types" diagnostic — concrete types resolve cleanly,
+    // open generics don't.
+    const out = generateClientHook(agent({}), "/fake/.ayjnt/client/chat/index.tsx");
+    expect(out).toContain("useAgentUpstream<Instance, AgentState>");
+    expect(out).toContain(
+      "ReturnType<typeof useAgentUpstream<Instance, AgentState>>",
+    );
+    // No State generic on the wrapper itself — bare useAgent() call.
+    expect(out).toMatch(/export function useAgent\(\s*options/);
   });
 });
 

@@ -6,7 +6,7 @@ import CodeBlock from "@/components/CodeBlock.astro";
 
 // Hoisted to consts so the embedded backtick/dollar-brace sequences
 // don't confuse Astro's JSX-expression parser.
-const workingClientScript = `import { agentFetch } from "agents/client";
+const agentFetchScript = `import { agentFetch } from "agents/client";
 
 const host = process.env.HOST ?? "http://localhost:8787";
 const roomId = "demo-room";
@@ -32,6 +32,34 @@ const get = await agentFetch({
   host,
 });
 console.log("GET:", await get.json());`;
+
+const agentClientScript = `import { AgentClient } from "agents/client";
+import type NotesAgent from "./agents/notes/agent.ts";
+
+const host = (process.env.HOST ?? "http://localhost:8787")
+  .replace(/^https?:\\/\\//, "");
+const instance = process.env.INSTANCE ?? "default";
+
+// Generic <NotesAgent> binds the stub against the agent class:
+// client.stub.addNote(...) is typed end-to-end against every
+// @callable() method on the class.
+const client = new AgentClient<NotesAgent>({
+  agent: "NotesAgent",
+  basePath: \`notes/\${instance}\`,        // bypasses /agents/<kebab>/<name>
+  host,
+  onStateUpdate: (state, source) =>
+    console.log(\`[\${source}] \${state.notes.length} notes\`),
+  onIdentity: (name, agent) =>
+    console.log(\`connected to \${agent}#\${name}\`),
+});
+
+await client.ready;                       // wait for the identity handshake
+
+const note = await client.stub.addNote("hello"); // typed!
+const total = await client.stub.countNotes();    // → number
+await client.call("deleteNote", [note.id]);      // string-name fallback
+
+client.close();`;
 
 const chatComponentCode = `import { useAgent } from "agents/react";
 
@@ -122,16 +150,138 @@ const agent = useAgent({
 			</p>
 		</Callout>
 
-		<h2>A working client script</h2>
+		<h2>Three ways to talk to an agent</h2>
 		<p>
-			This is from <code>examples/with-client/client.ts</code>:
+			The Cloudflare Agents SDK exposes three client surfaces, each
+			with a different fit:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Surface</th>
+					<th>Transport</th>
+					<th>Use when</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>useAgent</code> from <code>agents/react</code>
+					</td>
+					<td>WebSocket</td>
+					<td>
+						React UI that wants live state pushes +{" "}
+						<code>@callable()</code> methods. <strong>ayjnt
+						generates a typed wrapper at{" "}
+						<code>@ayjnt/&lt;route&gt;</code></strong> — use that
+						in <code>app.tsx</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>AgentClient</code> from <code>agents/client</code>
+					</td>
+					<td>WebSocket</td>
+					<td>
+						Standalone script (Bun, Node, Deno) that needs to call
+						methods or watch state. The non-React counterpart of{" "}
+						<code>useAgent</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agentFetch</code> from <code>agents/client</code>
+					</td>
+					<td>HTTP</td>
+					<td>
+						One-shot request/response. Hits{" "}
+						<code>onRequest</code> on the agent. No
+						long-lived connection, no <code>@callable()</code>{" "}
+						support.
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			All three accept the same <code>basePath</code> override so the
+			gotcha above applies uniformly.
+		</p>
+
+		<h2>AgentClient — calling @callable methods from a script</h2>
+		<p>
+			<code>AgentClient</code> is a WebSocket-based class that exposes{" "}
+			<code>.stub.method()</code> /{" "}
+			<code>.call("method", [args])</code> for{" "}
+			<code>@callable()</code>-decorated methods, plus a typed{" "}
+			<code>.state</code> that updates on every server broadcast. It's
+			the right pick for any script that makes more than one call or
+			wants to observe state changes.
 		</p>
 		<CodeBlock
 			filename="client.ts"
 			lang="ts"
-			code={workingClientScript}
+			code={agentClientScript}
+			highlightLines={[10, 13, 14, 23, 24, 25]}
+		/>
+		<p>
+			The <code>&lt;NotesAgent&gt;</code> generic binds{" "}
+			<code>client.stub</code> to the agent class — every method
+			decorated with <code>@callable()</code> from <code>"agents"</code>{" "}
+			appears with full argument and return-type checking.{" "}
+			<code>client.call("methodName", [args])</code> is the
+			string-name fallback; it's typed when the generic is set and
+			drops to <code>UntypedAgentClientCall</code> when it isn't.
+		</p>
+		<p>
+			<code>await client.ready</code> resolves after the server emits
+			the <code>CF_AGENT_IDENTITY</code> message — handy as a debug
+			anchor for the <code>basePath</code> wiring (if it never
+			resolves, the URL is wrong). RPC calls before{" "}
+			<code>ready</code> queue and flush automatically once identity
+			arrives, so the await is optional.
+		</p>
+		<Callout kind="note" title="State pushes vs. setState()">
+			<p>
+				<code>onStateUpdate(state, source)</code> fires for every
+				state broadcast: once on connect with the current state,
+				then every time the agent calls <code>setState({"{...}"})</code>{" "}
+				— regardless of who triggered it. The{" "}
+				<code>source</code> field is <code>"server"</code> for server-
+				originated changes and <code>"client"</code> when{" "}
+				<em>this</em> client called <code>client.setState({"{...}"})</code>.
+			</p>
+		</Callout>
+		<p>
+			See <a href="/examples/callable-client" class="link-underline">
+				examples/callable-client
+			</a>{" "}
+			for the full working pair (server-side <code>@callable</code>{" "}
+			methods + this client script).
+		</p>
+
+		<h2>agentFetch — one-shot HTTP</h2>
+		<p>
+			When you just want to fire a request at the agent's{" "}
+			<code>onRequest</code> handler and read the response — no
+			long-lived socket, no <code>@callable()</code> dispatch — use{" "}
+			<code>agentFetch</code>:
+		</p>
+		<CodeBlock
+			filename="client.ts"
+			lang="ts"
+			code={agentFetchScript}
 			highlightLines={[10, 22]}
 		/>
+		<p>
+			Each call opens a fresh HTTP connection. Cheaper for two or
+			three calls; meaningfully worse than <code>AgentClient</code>{" "}
+			once you're making more than a handful or want to react to
+			state changes. Walkthrough in{" "}
+			<a href="/examples/with-client" class="link-underline">
+				examples/with-client
+			</a>
+			.
+		</p>
 
 		<h2>From a React app</h2>
 		<p>
@@ -210,22 +360,25 @@ export function Chat() {
 		<ul>
 			<li>
 				<code>GET</code> with <code>Upgrade: websocket</code> → agent's
-				WebSocket handler (this is what <code>useAgent</code> uses)
+				WebSocket handler (this is what <code>useAgent</code> and{" "}
+				<code>AgentClient</code> use). Carries <code>@callable()</code>{" "}
+				method calls and live state pushes.
 			</li>
 			<li>
 				<code>GET</code> with <code>Accept: text/html</code> → HTML shell
 				(if the agent has <code>app.tsx</code>)
 			</li>
 			<li>
-				Anything else → agent's <code>onRequest</code>
+				Anything else → agent's <code>onRequest</code>. This is what{" "}
+				<code>agentFetch</code> hits.
 			</li>
 		</ul>
 		<p>
-			So <code>useAgent</code> (WebSocket) and{" "}
-			<code>agentFetch(method: 'POST')</code> (HTTP) can coexist
-			pointing at the same URL; they hit different code paths on the
-			server. The choice between them is a question of whether you need
-			realtime state sync (WebSocket) or fire-and-forget (HTTP).
+			So the three clients ({" "}
+			<code>useAgent</code>, <code>AgentClient</code>,{" "}
+			<code>agentFetch</code>) can coexist against the same URL — they
+			hit different code paths on the server, picked by the request
+			shape, not the path.
 		</p>
 	</DocPageShell>
 </DocsLayout>

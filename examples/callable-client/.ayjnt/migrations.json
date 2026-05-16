@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-05-16T03:08:21.069Z",
+      "new_sqlite_classes": [
+        "NotesAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "notes": {
+      "agentId": "notes",
+      "className": "NotesAgent",
+      "firstTag": "v1"
+    }
+  }
+}

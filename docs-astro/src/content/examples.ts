@@ -874,6 +874,163 @@ POST /orders/customer-3
 		],
 	},
 
+	// --- callable-client ----------------------------------------------------
+	{
+		slug: "callable-client",
+		title: "Client-callable methods",
+		description:
+			"Cloudflare's `@callable()` decorator + `agent.stub.method()` from the React UI. Three patterns share the word \"callable\" in this framework — this example uses all three on one agent so the differences are unmissable: CF's decorator for browser→agent WebSocket RPC, ayjnt's `getAgent<T>` for agent→agent DO RPC, and ayjnt's `/** @callable */` JSDoc for catalog metadata.",
+		tags: ["rpc", "callable", "ui", "websocket"],
+		status: "stable",
+		exampleDir: "examples/callable-client",
+		preview: {
+			kind: "terminal",
+			lines: [
+				"const agent = useAgent();",
+				'const n = await agent.stub',
+				'  .addNote("hello");',
+				"// → { id, text, createdAt }",
+				"//   typed end-to-end",
+			],
+		},
+		whatYoullLearn: [
+			"How `@callable()` from \"agents\" exposes methods to the browser over WebSocket",
+			"How `agent.stub.method(args)` and `agent.call(\"method\", [args])` differ",
+			"Why `@callable()` complements `setState({...})` rather than replacing it",
+			"How the three \"callable\" patterns layer on the same method without conflict",
+		],
+		steps: [
+			SCAFFOLD_WITH_UI,
+			{
+				title: "Decorate methods with @callable from \"agents\"",
+				blurb:
+					"`@callable()` is a real TypeScript 5 decorator imported from the Cloudflare Agents SDK. At runtime the SDK registers each decorated method in its callable registry; bundlers transpile the decorator using the ES decorator helper. Bun + Bun.build handle this natively — no plugin, no `experimentalDecorators` flag.",
+				files: [
+					{
+						path: "agents/notes/agent.ts",
+						lang: "ts",
+						code: `import { Agent, callable } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Note = { id: string; text: string; createdAt: number };
+type State = { notes: Note[] };
+
+export default class NotesAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = { notes: [] };
+
+  /**
+   * Add a note. The agent generates the id; only the server can.
+   * @callable
+   */
+  @callable({ description: "Add a new note." })
+  async addNote(text: string): Promise<Note> {
+    const note = { id: crypto.randomUUID(), text, createdAt: Date.now() };
+    this.setState({ notes: [...this.state.notes, note] });
+    return note;
+  }
+
+  /**
+   * Delete a note by id. Returns true if it existed.
+   * @callable
+   */
+  @callable({ description: "Delete a note by id." })
+  async deleteNote(id: string): Promise<boolean> {
+    const before = this.state.notes.length;
+    this.setState({ notes: this.state.notes.filter((n) => n.id !== id) });
+    return this.state.notes.length < before;
+  }
+}`,
+						highlightLines: [1, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+					},
+				],
+			},
+			{
+				title: "Call from the UI via agent.stub.<method>",
+				blurb:
+					"The generated `useAgent()` hook is pre-bound to `NotesAgent` at codegen time, so `agent.stub` is a typed proxy over every `@callable()` method. Calling `agent.stub.addNote(\"hello\")` sends a WebSocket frame, the agent dispatches to the decorated method, the return value is JSON-serialised back, and the Promise resolves — typed end-to-end. `setState` inside the method broadcasts the new state to every connected client, so a second tab sees the note immediately.",
+				files: [
+					{
+						path: "agents/notes/app.tsx",
+						lang: "tsx",
+						code: `import { useState } from "react";
+import { useAgent } from "@ayjnt/notes";
+
+export default function NotesApp() {
+  const agent = useAgent();                    // no generic needed — typed
+  const notes = agent.state?.notes ?? [];
+  const [text, setText] = useState("");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    const note = await agent.stub.addNote(text.trim());   // typed!
+    console.log("created:", note.id, note.text);
+    setText("");
+  };
+
+  return (
+    <main>
+      <form onSubmit={submit}>
+        <input value={text} onChange={(e) => setText(e.target.value)} />
+        <button type="submit">add</button>
+      </form>
+      <ul>
+        {notes.map((n) => (
+          <li key={n.id}>
+            {n.text}{" "}
+            <button onClick={() => agent.stub.deleteNote(n.id)}>×</button>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}`,
+						highlightLines: [5, 12, 26],
+					},
+				],
+			},
+			{
+				title: "Three \"callable\" patterns on one agent",
+				blurb:
+					"`@callable()` (CF's decorator) makes methods reachable from the browser. `/** @callable */` (ayjnt's JSDoc tag) advertises them in `/__ayjnt/catalog`. `getAgent<T>` calls them from another agent. The three are orthogonal — pick the audience(s) you want. The example uses all three on every method so each pattern is observable independently.",
+				terminal: [
+					{ kind: "command", text: "# Browser → agent (CF @callable decorator)" },
+					{ kind: "command", text: "# (in browser): await agent.stub.addNote('first')" },
+					{ kind: "success", text: '{ "id": "uuid-...", "text": "first", "createdAt": ... }' },
+					{ kind: "blank" },
+					{ kind: "command", text: "# Catalog → discoverable (ayjnt /** @callable */ JSDoc)" },
+					{
+						kind: "command",
+						text: "curl localhost:8787/__ayjnt/catalog | jq '.agents[] | select(.routePath == \"/notes\") | .callables[].name'",
+					},
+					{ kind: "success", text: '"addNote"' },
+					{ kind: "success", text: '"deleteNote"' },
+					{ kind: "success", text: '"clearNotes"' },
+					{ kind: "success", text: '"countNotes"' },
+					{ kind: "blank" },
+					{ kind: "command", text: "# Agent → agent (ayjnt getAgent<T>, no decorator needed)" },
+					{ kind: "command", text: "# in another agent: await getAgent<NotesAgent>(env.NOTES_AGENT, 'main').addNote('via RPC')" },
+					{ kind: "success", text: "// works — public methods are always callable via DO RPC" },
+				],
+			},
+			{
+				title: "Run it",
+				blurb:
+					"`bun run dev` exposes the React UI at /notes and the catalog at /__ayjnt/catalog. Open the UI in two tabs — every `agent.stub.addNote` from one tab triggers a `setState` broadcast that the other tab sees live.",
+				terminal: [
+					{ kind: "command", text: "bun install" },
+					{ kind: "command", text: "bun run dev" },
+					{ kind: "output", text: "✓ ayjnt: 1 agent(s), 1 with UI, 1 with docs → .ayjnt/dist/wrangler.jsonc" },
+					{ kind: "output", text: "⎔ Listening on http://localhost:8787" },
+					{ kind: "blank" },
+					{ kind: "command", text: "open http://localhost:8787/notes" },
+					{ kind: "command", text: "# open the same URL in a second tab to see live state sync" },
+				],
+			},
+			deployStep("https://my-app.<account>.workers.dev"),
+		],
+	},
+
 	// --- with-ui ------------------------------------------------------------
 	{
 		slug: "with-ui",

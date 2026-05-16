@@ -1,24 +1,29 @@
 ---
 name: ayjnt-rpc
-description: Call one ayjnt agent from another with typed Durable Object RPC, and expose methods via the `@callable` JSDoc convention so they appear in `/__ayjnt/catalog`. Use when the user says "call <agentB> from <agentA>", "inter-agent RPC", "expose a method as RPC", "getAgent<T>", "@callable", or "advertise this method in the catalog". Adds the method on the callee with the `@callable` tag, sets up the caller's `getAgent<T>` site with the right types, and confirms both sides compile.
+description: Call agent methods — from another agent (typed DO RPC via `getAgent<T>`), from a browser UI (Cloudflare's `@callable()` decorator + `agent.stub.method()`), or advertise them in the catalog (ayjnt's `/** @callable */` JSDoc tag). Use when the user says "call <agentB> from <agentA>", "inter-agent RPC", "call from the UI", "call from the browser", "agent.stub.method", "agent.call", "@callable decorator", or "advertise this method in the catalog". Three patterns share the word "callable" but mean different things — pick the right one based on who's invoking the method (another agent, a browser, or a tooling consumer reading the catalog).
 ---
 
-# Inter-agent RPC + `@callable`
+# Three patterns called "callable" — pick the right one
 
-Two intertwined patterns:
+The word "callable" gets used three different ways in this stack.
+Sorting them out first saves a lot of confusion:
 
-1. **`getAgent<T>(namespace, name)`** — typed DO stub for calling
-   methods on another agent. Native Workers RPC, no HTTP, no JSON
-   round-trip.
-2. **`/** @callable */` JSDoc tag** — opt-in marker that surfaces the
-   method in the `/__ayjnt/catalog` JSON tree so other agents (and
-   external tooling) can discover the public RPC surface.
+| Pattern | Caller | Mechanism | Source |
+|---|---|---|---|
+| **`getAgent<T>`** | Another agent (worker-side) | Native Cloudflare DO RPC | `from "ayjnt/rpc"` |
+| **`@callable()` decorator** | Browser UI (`agent.stub.method()`) | WebSocket RPC | `from "agents"` (Cloudflare) |
+| **`/** @callable */` JSDoc** | Catalog consumers (`/__ayjnt/catalog`) | Build-time metadata | None — parsed by ayjnt |
 
-The two are independent — a method can be `@callable` without being
-called via RPC, and a method can be RPC-called without being
-`@callable`. Use them together when both apply.
+They're orthogonal. A method can use any combination of them at once.
+See [`examples/callable-client`](../../../examples/callable-client) for
+all three on the same method.
 
-## Callee — expose a method
+## Pattern 1 — agent-to-agent: `getAgent<T>`
+
+When one agent in the worker needs to call another. Native DO RPC,
+no decorator needed — TypeScript's `public` is enough.
+
+### Callee (no decorator required)
 
 ```ts
 // agents/inventory/agent.ts
@@ -30,10 +35,7 @@ type State = { stock: Record<string, number> };
 export default class InventoryAgent extends Agent<GeneratedEnv, State> {
   override initialState: State = { stock: { widget: 10 } };
 
-  /**
-   * Decrement stock for a SKU. Throws on insufficient stock.
-   * @callable
-   */
+  // Plain public method — callable by other agents via getAgent<T>.
   async decrement(sku: string, qty: number): Promise<number> {
     const current = this.state.stock[sku] ?? 0;
     if (current < qty) throw new Error(`insufficient stock for ${sku}`);
@@ -44,20 +46,7 @@ export default class InventoryAgent extends Agent<GeneratedEnv, State> {
 }
 ```
 
-### `@callable` rules
-
-- Tag is the **opt-in marker** — methods without it stay private to
-  the class (still callable via DO RPC from other agents that import
-  the type, but not advertised in the catalog).
-- Parsed source-level. Three constraints:
-  - JSDoc must **immediately precede** the method.
-  - Parameter list must fit on **one line**.
-  - Return type annotation must not contain a top-level `{` (object
-    literal types as return annotation aren't supported).
-- The first prose line of the JSDoc becomes the description in the
-  catalog.
-
-## Caller — typed stub
+### Caller
 
 ```ts
 // agents/orders/agent.ts
@@ -71,15 +60,12 @@ export default class OrdersAgent extends Agent<GeneratedEnv> {
     const { sku, qty } = (await request.json()) as { sku: string; qty: number };
     try {
       const inv = await getAgent<InventoryAgent>(
-        this.env.INVENTORY_AGENT,   // generated DO binding — autocomplete works
+        this.env.INVENTORY_AGENT,   // generated DO binding
         "main",                     // instance name
       );
       const remaining = await inv.decrement(sku, qty);   // typed!
       return Response.json({ ok: true, remaining });
     } catch (err) {
-      // Exception from the callee re-throws here verbatim. Convert it
-      // to a structured response so external clients don't see a
-      // text/plain 500 stack.
       const message = err instanceof Error ? err.message : String(err);
       return Response.json({ ok: false, error: message }, { status: 409 });
     }
@@ -87,25 +73,177 @@ export default class OrdersAgent extends Agent<GeneratedEnv> {
 }
 ```
 
-### `getAgent<T>` invariants
+### Invariants
 
-- Pass the **DO namespace from env**, not raw `env.INVENTORY_AGENT.idFromName(...)`.
-  The helper wraps `idFromName → get → setName`, which is what
-  teaches the target DO its own `name` — required for
-  `CF_AGENT_IDENTITY` messages to the client.
-- Generic parameter is the **agent class** — `type` import so the
-  worker doesn't try to bundle the implementation. The return type
-  is `DurableObjectStub<T>` with full method autocomplete.
-- **`await` every call.** Each method call is an RPC round-trip to
-  the target DO, possibly on another machine. Don't loop without
-  batching.
-- **Args must be structured-cloneable** — plain data, no functions.
-  `Date`, `Map`, `Set` need explicit serialisation.
+- Pass the DO namespace from `env`, not raw `env.X.idFromName(...)`.
+  `getAgent` wraps `idFromName → get → setName` so the target DO learns
+  its own `name` (required for `CF_AGENT_IDENTITY` messages).
+- Generic parameter is the agent class — `type` import so the worker
+  doesn't bundle the implementation.
+- Awaiting every call. Each one is a DO round-trip, possibly on
+  another machine.
+- Args must be structured-cloneable. No functions; serialise `Date`,
+  `Map`, `Set` yourself.
+
+## Pattern 2 — browser-to-agent: Cloudflare's `@callable()`
+
+When the React UI in `app.tsx` needs to invoke an agent method.
+This is **the right pattern** for any UI interaction that isn't a
+pure state replacement.
+
+### Agent — decorate methods to expose
+
+```ts
+// agents/notes/agent.ts
+import { Agent, callable } from "agents";        // ← decorator from "agents"
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Note = { id: string; text: string };
+type State = { notes: Note[] };
+
+export default class NotesAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = { notes: [] };
+
+  @callable({ description: "Add a new note." })
+  async addNote(text: string): Promise<Note> {
+    const note = { id: crypto.randomUUID(), text };
+    this.setState({ notes: [...this.state.notes, note] });
+    return note;
+  }
+
+  @callable()
+  async deleteNote(id: string): Promise<boolean> {
+    const before = this.state.notes.length;
+    this.setState({ notes: this.state.notes.filter((n) => n.id !== id) });
+    return this.state.notes.length < before;
+  }
+}
+```
+
+### UI — call via `agent.stub.method()`
+
+```tsx
+// agents/notes/app.tsx
+import { useAgent } from "@ayjnt/notes";        // ← generated, type-bound
+
+export default function NotesApp() {
+  const agent = useAgent();                      // no generic needed
+  const submit = async () => {
+    const note = await agent.stub.addNote("hello");   // typed end-to-end
+    console.log("created:", note.id, note.text);
+  };
+  // ...
+}
+```
+
+The generated `useAgent()` hook is pre-bound to the agent class, so
+`agent.stub.<method>` autocompletes with every `@callable()`
+decorator. `agent.call("<method>", [args])` is the untyped fallback.
+
+### When to reach for `@callable()` instead of `setState()`
+
+Use it for behaviour that can't be expressed as a pure state
+replacement:
+
+- **Server-generated values.** "Create with a fresh UUID" — only the
+  server can produce the id.
+- **Conditional logic.** "Delete if exists", "decrement only if
+  positive", "verify a secret before applying".
+- **Derived values.** "How many items match this filter?" — count
+  on the server, return the number.
+- **Anything that should fail at the boundary.** Throw from the
+  callable; the Promise rejects on the client.
+
+`setState({...})` is still right when the change *is* the new state.
+
+### Invariants
+
+- **Decorator imported from `"agents"`**, not `"ayjnt/rpc"`. The
+  decorator name is `callable` (also exported as deprecated
+  `unstable_callable`). Use `callable`.
+- **Method must be public.** Decorated methods are exposed over
+  WebSocket — they're public by definition.
+- **Args and return values must be JSON-serialisable.** Same
+  constraint as DO RPC: plain data only.
+- **Throwing propagates to the client.** The browser-side Promise
+  rejects with the error message.
+- **Bun handles the decorator transpilation natively** — no Vite
+  plugin or tsconfig flag needed. Modern TS5 decorators.
+
+### Streaming responses
+
+For long-running calls, decorate with `streaming: true` and receive
+a `StreamingResponse`:
+
+```ts
+@callable({ streaming: true })
+async generate(stream: StreamingResponse, prompt: string) {
+  for await (const chunk of this.llm.stream(prompt)) {
+    stream.send(chunk);
+  }
+  stream.end();
+}
+```
+
+## Pattern 3 — discovery: ayjnt's `/** @callable */` JSDoc
+
+A build-time **metadata tag**. Tagged methods show up in
+`/__ayjnt/catalog` with name, params, return type, and description.
+Has no runtime effect on its own — it doesn't make the method
+callable from anywhere.
+
+```ts
+/**
+ * Add a new note to the list.
+ * @callable                                     ← ayjnt JSDoc tag
+ */
+@callable({ description: "Add a new note." })   // ← CF decorator
+async addNote(text: string): Promise<Note> { /* … */ }
+```
+
+Use the JSDoc tag when:
+
+- The method is part of the agent's public surface and you want
+  other developers (or tooling) to discover it via the catalog.
+- You're documenting the RPC contract for consumers outside the
+  worker.
+
+Catalog filtering still goes through each agent's middleware chain —
+admin agents stay hidden from anonymous callers.
+
+```sh
+curl http://localhost:8787/__ayjnt/catalog \
+  | jq '.agents[] | select(.routePath == "/notes") | .callables'
+```
+
+### Tag rules
+
+- Parsed source-level (regex). Three constraints:
+  - JSDoc must **immediately precede** the method.
+  - Parameter list must fit on **one line**.
+  - Return type annotation must not contain a top-level `{`
+    (object literal types as return types aren't supported).
+- The first prose line of the JSDoc becomes the catalog description.
+
+## Combining them
+
+The mix-and-match matrix:
+
+| `getAgent<T>` (caller-side) | `@callable()` decorator | `/** @callable */` JSDoc | Behaviour |
+|---|---|---|---|
+| ✓ | ✗ | ✗ | Reachable from other agents only. |
+| ✓ | ✓ | ✗ | Reachable from agents AND browser UI. Catalog-hidden. |
+| ✓ | ✓ | ✓ | **Recommended for public methods.** All three audiences. |
+| ✓ | ✗ | ✓ | Reachable from agents, advertised in catalog. Not from browser. |
+
+`getAgent<T>` always works against any public method — no decoration
+required, because DO RPC doesn't go through the WebSocket / catalog
+layers.
 
 ## Common pitfalls
 
-- **`Error` is JSON-stringified to `"[object Object]"`.** When
-  catching at an HTTP boundary, pull `.message`:
+- **Error JSON-stringifies to `"[object Object]"`.** Pull `.message`
+  when translating to an HTTP response:
 
   ```ts
   catch (err) {
@@ -115,34 +253,42 @@ export default class OrdersAgent extends Agent<GeneratedEnv> {
   ```
 
 - **DO state survives worker restarts.** Re-running a demo accumulates
-  state. `rm -rf .wrangler` in dev to reset local DO storage.
+  state. `rm -rf .wrangler` in dev to reset.
 
-- **`env.<BINDING>` autocomplete.** The DO binding name is derived
-  from the class name (`InventoryAgent` → `INVENTORY_AGENT`). If
-  autocomplete is missing, run `bun run build` once so `env.d.ts`
-  regenerates.
+- **Decorator transpilation.** Modern TS5 decorators work natively
+  in Bun (server) and Bun.build (client). No `experimentalDecorators`
+  flag needed. If you see "decorators are not valid here", your
+  bundler is doing pre-TS5 decorator transformation — fix the target
+  or update the tooling.
 
-- **Renaming a callee method without coordinating** breaks every
-  caller at compile time — that's a feature. Both sides surface the
-  break instantly because the types are linked through the
-  `type` import.
+- **`agent.stub` is untyped → `UntypedAgentStub`.** Means the typed
+  `useAgent()` overload didn't bind — usually a generated-hook
+  mismatch. Re-run `bun run build`; the generated hook in
+  `.ayjnt/client/<route>/index.tsx` should call
+  `useAgentUpstream<Instance, AgentState>(...)`.
+
+- **Renaming a `@callable` method.** Breaks every browser call
+  site at compile time when types are properly threaded. Renames in
+  the agent class propagate to `agent.stub.<new-name>` after the
+  next build.
 
 ## Catalog visibility
 
-After tagging methods with `@callable`, run `bun run build` and:
+After tagging methods with `/** @callable */`, run `bun run build` and:
 
 ```sh
-curl http://localhost:8787/__ayjnt/catalog | jq '.agents[] | { route: .routePath, callables: .callables[].name }'
+curl http://localhost:8787/__ayjnt/catalog \
+  | jq '.agents[] | { route: .routePath, callables: .callables[].name }'
 ```
 
-…lists every accessible agent and its callable methods. The catalog
-is filtered by per-agent middleware — admin agents are hidden from
-anonymous callers automatically. See
-[`ayjnt-middleware`](../ayjnt-middleware/SKILL.md).
+…lists every accessible agent and its callable methods.
 
 ## Reference
 
-- [`examples/inter-agent`](../../../examples/inter-agent) — Orders
-  agent calls Inventory.decrement with oversell protection.
-- [`examples/catalog`](../../../examples/catalog) — multi-agent
-  showcase with a React UI that renders `/__ayjnt/catalog` live.
+- [`examples/inter-agent`](../../../examples/inter-agent) — Pattern 1
+  (`getAgent<T>` between Orders and Inventory).
+- [`examples/callable-client`](../../../examples/callable-client) —
+  Patterns 1, 2, and 3 on one set of methods.
+- [`examples/catalog`](../../../examples/catalog) — Pattern 3 with
+  a React UI rendering `/__ayjnt/catalog` live.
+- [Cloudflare's @callable docs](https://developers.cloudflare.com/agents/api-reference/callable-methods/).

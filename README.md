@@ -40,7 +40,7 @@ bun run dev
 
 The blank starter gives you a single agent at `/alive/:instance-id` that responds `{"status":"alive","message":"I'm alive"}` — the minimum that proves routing, DO binding, and state wiring all work. Every example in `/examples` starts from this scaffold and replaces `agents/alive` with its own agents.
 
-Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/catalog`](./examples/catalog) · [`examples/scheduler`](./examples/scheduler) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
+Jump to a concrete walkthrough: [`examples/basic`](./examples/basic) · [`examples/with-ui`](./examples/with-ui) · [`examples/callable-client`](./examples/callable-client) · [`examples/catalog`](./examples/catalog) · [`examples/scheduler`](./examples/scheduler) · [`examples/chat-rooms`](./examples/chat-rooms) · [`examples/ai-chatbot`](./examples/ai-chatbot) · [`examples/agentic-rag`](./examples/agentic-rag) · [`examples/mission-control`](./examples/mission-control) — or see the full gallery in [`examples/`](./examples).
 
 ## File conventions
 
@@ -143,6 +143,49 @@ Gotchas to be aware of:
 - **Env type is your responsibility** (until v0.3). Declare each binding you use on the caller's `Env` with `DurableObjectNamespace<TargetAgent>`.
 
 See [`examples/inter-agent`](./examples/inter-agent) for a two-agent demonstration with oversell protection.
+
+## Client-callable methods
+
+For methods that need to be invoked **from the browser UI** — not from another agent — use Cloudflare's `@callable()` decorator instead of `getAgent<T>`:
+
+```ts
+// agents/notes/agent.ts
+import { Agent, callable } from "agents";        // ← decorator from "agents"
+
+export default class NotesAgent extends Agent<GeneratedEnv, State> {
+  @callable({ description: "Add a new note." })
+  async addNote(text: string): Promise<Note> {
+    const note = { id: crypto.randomUUID(), text };
+    this.setState({ notes: [...this.state.notes, note] });
+    return note;
+  }
+}
+```
+
+```tsx
+// agents/notes/app.tsx
+import { useAgent } from "@ayjnt/notes";
+
+export default function NotesApp() {
+  const agent = useAgent();                              // typed to NotesAgent
+  const note = await agent.stub.addNote("hello");        // typed end-to-end
+  // or: await agent.call("addNote", ["hello"]);          // untyped fallback
+}
+```
+
+The Cloudflare Agents SDK transports the call over WebSocket; ayjnt's generated `useAgent()` hook is pre-bound to your agent class so `agent.stub.<method>` autocompletes with every decorated method.
+
+### When to use which
+
+| Caller | Pattern | Use |
+|---|---|---|
+| Another agent (worker-side) | `getAgent<T>` from `ayjnt/rpc` | Native DO RPC. No decorator needed. |
+| Browser UI (React) | `@callable()` decorator + `agent.stub.method()` | WebSocket RPC. Decorator required to expose. |
+| Catalog consumers (tooling) | `/** @callable */` JSDoc tag | Build-time metadata. Surfaces method in `/__ayjnt/catalog`. |
+
+The three patterns are orthogonal — a single method can use any combination. See [`examples/callable-client`](./examples/callable-client) for all three on the same agent.
+
+`@callable()` complements `setState({...})`: use `setState` when the change *is* the new state, `@callable` for server-generated values (fresh UUIDs), conditional logic (`delete if exists`), derived values (`count matching`), and anything that should throw at the boundary.
 
 ## Co-located UI
 
