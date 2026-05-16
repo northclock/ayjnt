@@ -409,6 +409,23 @@ This means two developers cannot race and produce divergent migration histories.
 - [x] **v0.6** — `docs.md` per agent, `@callable` JSDoc tag, `/__ayjnt/catalog` endpoint with access-filtered tree
 - [ ] **next** — file-watch HMR in dev, docs site generator from READMEs, `create-ayjnt` npm package
 
+## Claude Code skills
+
+The framework ships a set of [Claude Code skills](./.claude/skills) — focused
+markdown guides that walk Claude through common authoring tasks (add an agent, add a UI, register middleware, wire inter-agent RPC, build an MCP server, diagnose a failure). They live in `.claude/skills/` and auto-load when you open an ayjnt project in Claude Code.
+
+| Skill | Triggers on |
+|---|---|
+| [`ayjnt-overview`](./.claude/skills/ayjnt-overview/SKILL.md) | General "how does ayjnt work" questions. |
+| [`ayjnt-new-agent`](./.claude/skills/ayjnt-new-agent/SKILL.md) | "Add an agent", "create an agent at /<route>". |
+| [`ayjnt-add-ui`](./.claude/skills/ayjnt-add-ui/SKILL.md) | "Add a UI", "co-locate a React component". |
+| [`ayjnt-mcp`](./.claude/skills/ayjnt-mcp/SKILL.md) | "Build an MCP server", "extend McpAgent". |
+| [`ayjnt-middleware`](./.claude/skills/ayjnt-middleware/SKILL.md) | "Add auth", "gate a subtree", "rate limit". |
+| [`ayjnt-rpc`](./.claude/skills/ayjnt-rpc/SKILL.md) | "Call another agent", "inter-agent RPC", "@callable". |
+| [`ayjnt-troubleshoot`](./.claude/skills/ayjnt-troubleshoot/SKILL.md) | Specific error symptoms — compatibility date, lockfile drift, 404 on agent, basePath. |
+
+`bunx ayjnt new <dir>` copies the same skills into the scaffolded project, so users who pick up ayjnt with Claude Code get the authoring help for free. They're plain markdown — edit or delete any that don't fit your house style.
+
 ## Development
 
 ```sh

@@ -12,8 +12,9 @@
 // a templates/ directory on npm (and worry about file path resolution
 // inside the published package).
 
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const USAGE = `\
 ayjnt new <directory> [options]
@@ -113,6 +114,34 @@ async function scaffold(
       counterApp(),
     );
   }
+
+  // Drop the Claude Code skills next to the project so authors who use
+  // Claude Code get the ayjnt-* skills (new-agent, mcp-app, middleware,
+  // rpc, troubleshoot, etc.) auto-loaded. Best-effort: silently skipped
+  // if the package wasn't installed with `.claude/skills` shipped (e.g.
+  // an old framework version) or if the resolved path doesn't exist.
+  copySkills(target);
+}
+
+/**
+ * Find `.claude/skills/` relative to the published CLI bin and copy it
+ * into the new project. The CLI lives at `<package-root>/dist/ayjnt.js`
+ * (production) or `<package-root>/bin/ayjnt.ts` (dev), so the skills
+ * directory is consistently at `<package-root>/.claude/skills/`.
+ */
+function copySkills(target: string): void {
+  // `import.meta.url` works in both Bun's direct .ts execution and the
+  // bundled .js artifact. From either, ../ gets us to the package root.
+  const cliDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(cliDir, "..", ".claude", "skills"),
+    path.resolve(cliDir, "..", "..", ".claude", "skills"),
+  ];
+  const source = candidates.find((p) => existsSync(p));
+  if (!source) return; // shipping without skills — that's fine
+  const dest = path.join(target, ".claude", "skills");
+  mkdirSync(path.dirname(dest), { recursive: true });
+  cpSync(source, dest, { recursive: true });
 }
 
 function sanitizePackageName(name: string): string {
@@ -289,6 +318,14 @@ ${body}
 | \`bun run build\` | Generate config + bundle, no deploy. |
 | \`bun run deploy\` | Build + git-safety checks + \`wrangler deploy\`. |
 | \`bun run migrate\` | Preview pending migrations. |
+
+## Claude Code skills
+
+The \`.claude/skills/\` directory ships with this scaffold. If you use
+Claude Code, those skills auto-load when you open this project and
+guide authoring tasks like *add an agent*, *add a UI*, *make an MCP
+App*, *call another agent*, and *troubleshoot a failure*. They're
+plain markdown — edit or delete any that don't fit your house style.
 `;
 }
 

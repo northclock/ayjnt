@@ -29,6 +29,7 @@
   "files": [
     "src",
     "dist",
+    ".claude/skills",
     "README.md"
   ],
   "scripts": {
