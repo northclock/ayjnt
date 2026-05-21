@@ -8,6 +8,7 @@ dist
 
 # ayjnt generated artifacts (migrations.json IS committed)
 .ayjnt/dist
+.ayjnt/assets
 .ayjnt/manifest.json
 .wrangler
 
