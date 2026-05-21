@@ -90,7 +90,11 @@ export async function scan(root: string): Promise<Manifest> {
     // whole workspace, because the wrangler bindings are workspace-wide.
     if (importsAyjntBrowser(source)) features.browser = true;
     if (hasOnEmail) features.email = true;
-    if (isVoice) features.voice = true;
+    // Any `@cloudflare/voice` import (mixin OR provider classes like
+    // `WorkersAIFluxSTT`) needs the workspace's AI binding. The per-agent
+    // `isVoice` flag stays tied to the `withVoice(` mixin specifically —
+    // that's what drives the typed `useVoiceAgent` client hook codegen.
+    if (isVoice || importsCloudflareVoice(source)) features.voice = true;
   }
 
   entries.sort((a, b) => a.routePath.localeCompare(b.routePath));
@@ -202,6 +206,24 @@ function emptyFeatures(): FeatureFlags {
     emailResolverFile: null,
     voice: false,
   };
+}
+
+/** True when the source imports anything from `@cloudflare/voice` (the
+ *  package root or any subpath like `@cloudflare/voice/providers`).
+ *  Used to flip the workspace `voice` feature flag — which provisions
+ *  the `AI` binding in wrangler.jsonc — without falsely tagging the
+ *  agent as a 1:1 voice agent.
+ *
+ *  This is broader than {@link detectWithVoice}: it fires for STT/TTS
+ *  providers used outside the `withVoice` mixin too (e.g. a multi-party
+ *  conference room that runs Whisper per participant). */
+export function importsCloudflareVoice(source: string): boolean {
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  return /\bimport\b[^;\n]*?(["'])@cloudflare\/voice(?:\/[^"']*)?\1/.test(
+    stripped,
+  );
 }
 
 /** True when the source uses Cloudflare's `withVoice(...)` mixin from

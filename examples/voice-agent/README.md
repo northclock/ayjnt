@@ -96,7 +96,7 @@ export default function VoiceUI() {
       <button onClick={() => v.toggleMute()}>{v.isMuted ? "unmute" : "mute"}</button>
       <button onClick={() => v.endCall()}>end</button>
       <ol>
-        {v.transcript.map((m, i) => <li key={i}>{m.role}: {m.content}</li>)}
+        {v.transcript.map((m, i) => <li key={i}>{m.role}: {m.text}</li>)}
       </ol>
     </main>
   );

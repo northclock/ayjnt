@@ -51,7 +51,7 @@ export default function VoiceUI() {
       <ol style={styles.transcript}>
         {v.transcript.map((m, i) => (
           <li key={i} style={styles.line}>
-            <strong style={styles.role}>{m.role}:</strong> {m.content}
+            <strong style={styles.role}>{m.role}:</strong> {m.text}
           </li>
         ))}
       </ol>

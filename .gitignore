@@ -9,6 +9,7 @@ dist
 # ayjnt generated artifacts (migrations.json IS committed)
 .ayjnt/dist
 .ayjnt/manifest.json
+.wrangler
 
 # code coverage
 coverage

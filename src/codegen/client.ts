@@ -405,6 +405,26 @@ function escapeHtml(s: string): string {
  * Uses Bun.build with target: "browser" so React, agents/react, and the
  * generated typed hook all get pulled in and tree-shaken. Minified to keep
  * worker bundle size down.
+ *
+ * ## React deduplication
+ *
+ * When ayjnt is symlinked into an example (the dev setup) the framework
+ * has its own `node_modules/react` (used for type-checking
+ * `src/runtime/voiceClient.tsx`) and so does the example. Bun.build
+ * resolves `react` from each importer's location, which produces two
+ * physical React copies in the bundle — one referenced by the user's
+ * app.tsx and one by `ayjnt/voice/client` (which transitively imports
+ * `@cloudflare/voice/react`).
+ *
+ * Two copies = two dispatchers, and the second `useMemo` call hits a
+ * dispatcher that's `null` for that React's current render tree:
+ *
+ *   "TypeError: Cannot read properties of null (reading 'useMemo')"
+ *
+ * To prevent this, we pin `react` / `react-dom` / `react/jsx-runtime`
+ * (and their `/client` subpaths) to the project root's copy via a Bun
+ * plugin. The user installs React once in their app; every package in
+ * the bundle uses that single resolved path.
  */
 export async function bundleApp(params: {
   appEntry: string;
@@ -416,6 +436,7 @@ export async function bundleApp(params: {
     format: "esm",
     minify: true,
     root: params.projectRoot,
+    plugins: [reactDedupePlugin(params.projectRoot)],
   });
 
   if (!result.success || result.outputs.length === 0) {
@@ -429,6 +450,65 @@ export async function bundleApp(params: {
   // our minimal setup (single entry, no dynamic imports in app.tsx), the
   // first output is the bundled entry.
   return await result.outputs[0]!.text();
+}
+
+/**
+ * Bun plugin that pins every `react` / `react-dom` import (and the
+ * common subpaths) to the project root's resolved location.
+ *
+ * Without this, a symlinked framework can bring a second React copy
+ * into the bundle via its own `node_modules`, and the React
+ * "no active dispatcher" error fires on the first hook call from
+ * the wrong copy.
+ *
+ * Implementation notes:
+ *   - We resolve each module once eagerly (sync) at plugin construction
+ *     time and cache the result. Bun's `onResolve` callback runs per
+ *     import; using a cached canonical path keeps the hot path trivial.
+ *   - If the resolver throws (no React installed in the project — fine
+ *     for non-React agents), we leave the import untouched and let
+ *     Bun's default resolver run. That way bundling a non-React
+ *     example doesn't fail just because of a missing peer.
+ */
+function reactDedupePlugin(projectRoot: string): import("bun").BunPlugin {
+  const SUBPATHS = [
+    "react",
+    "react/jsx-runtime",
+    "react/jsx-dev-runtime",
+    "react-dom",
+    "react-dom/client",
+  ];
+
+  // Resolve each subpath from the project root once. Bun.resolveSync
+  // walks up parent dirs the same way module resolution does at
+  // runtime, so this gives us the canonical absolute path.
+  const canonical = new Map<string, string>();
+  for (const spec of SUBPATHS) {
+    try {
+      canonical.set(spec, Bun.resolveSync(spec, projectRoot));
+    } catch {
+      // No React installed in the project (e.g. an agent without
+      // a UI); leave this entry off the map.
+    }
+  }
+
+  return {
+    name: "ayjnt:react-dedupe",
+    setup(build) {
+      // One filter per pinned import path. Bun's onResolve matches by
+      // regex against the importer's specifier; we use exact-string
+      // alternation so we don't accidentally rewrite e.g. `react-foo`.
+      // The `^...$` anchors are essential.
+      const pattern = new RegExp(
+        `^(${SUBPATHS.map((s) => s.replace(/[/.]/g, "\\$&")).join("|")})$`,
+      );
+      build.onResolve({ filter: pattern }, (args) => {
+        const target = canonical.get(args.path);
+        if (!target) return null; // pass through to Bun's default
+        return { path: target };
+      });
+    },
+  };
 }
 
 function toImportSpec(fromDir: string, toFile: string): string {

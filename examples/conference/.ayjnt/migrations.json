@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-05-21T06:22:33.401Z",
+      "new_sqlite_classes": [
+        "ConferenceRoom"
+      ]
+    },
+    {
+      "tag": "v2",
+      "timestamp": "2026-05-21T06:31:42.318Z",
+      "new_sqlite_classes": [
+        "Transcriber"
+      ]
+    }
+  ],
+  "classes": {
+    "room": {
+      "agentId": "room",
+      "className": "ConferenceRoom",
+      "firstTag": "v1"
+    },
+    "transcriber": {
+      "agentId": "transcriber",
+      "className": "Transcriber",
+      "firstTag": "v2"
+    }
+  }
+}
