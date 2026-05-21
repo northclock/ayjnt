@@ -1,0 +1,26 @@
+{
+  "name": "ayjnt-example-voice-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ayjnt dev",
+    "build": "ayjnt build",
+    "deploy": "ayjnt deploy",
+    "migrate": "ayjnt migrate"
+  },
+  "dependencies": {
+    "agents": "^0.13.1",
+    "@cloudflare/voice": "^0.2.0",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260413.1",
+    "@types/bun": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "ayjnt": "latest",
+    "wrangler": "4.82.1"
+  }
+}

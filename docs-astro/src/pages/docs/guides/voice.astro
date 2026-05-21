@@ -1,0 +1,231 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Voice agents — ayjnt docs"
+	description="Wrap an agent in withVoice() to get a streaming WebSocket voice transport with Workers AI STT + TTS. ayjnt generates a typed useVoiceAgent hook that respects ayjnt's URL shape."
+>
+	<DocPageShell
+		slug="guides/voice"
+		lede="@cloudflare/voice gives Cloudflare's Agent SDK a streaming voice transport — WebSocket frames carry STT input and TTS output, with Workers AI doing the heavy lifting. ayjnt detects withVoice(), provisions the AI binding, and emits a typed useVoiceAgent hook the client can call without thinking about transport URLs."
+	>
+		<h2>The mixin</h2>
+		<p>
+			A voice agent extends a class produced by <code>withVoice(Agent)</code>:
+		</p>
+		<CodeBlock
+			filename="agents/chat/agent.ts"
+			lang="ts"
+			code={`import { Agent } from "agents";
+import { withVoice } from "@cloudflare/voice";
+import { WorkersAIFluxSTT, WorkersAITTS } from "@cloudflare/voice/providers";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type State = { transcript: Array<{ role: "user" | "assistant"; text: string }> };
+
+export default class ChatAgent extends withVoice(Agent)<GeneratedEnv, State> {
+  override initialState: State = { transcript: [] };
+
+  voice = {
+    stt: new WorkersAIFluxSTT({ binding: this.env.AI }),
+    tts: new WorkersAITTS({ binding: this.env.AI }),
+  };
+
+  // onTranscript fires once a full utterance is recognized.
+  async onTranscript(text: string): Promise<string> {
+    this.setState({
+      transcript: [...this.state.transcript, { role: "user", text }],
+    });
+
+    const reply = await this.respondTo(text);
+
+    this.setState({
+      transcript: [...this.state.transcript, { role: "assistant", text: reply }],
+    });
+
+    return reply; // ← TTS'd back to the client.
+  }
+
+  private async respondTo(text: string): Promise<string> {
+    // call your LLM here
+    return \`I heard you say: \${text}\`;
+  }
+}`}
+			highlightLines={[2, 8, 11, 16]}
+		/>
+
+		<h2>What ayjnt wires up</h2>
+		<p>
+			Detecting <code>withVoice(</code> in the agent's source file
+			flips a <code>voice</code> feature flag and:
+		</p>
+		<ul>
+			<li>
+				Adds an <code>ai</code> binding to{" "}
+				<code>wrangler.jsonc</code> (idempotent — it's already there
+				if you also have browser tools).
+			</li>
+			<li>
+				Adds <code>AI: Ai</code> to <code>GeneratedEnv</code>.
+			</li>
+			<li>
+				Generates a typed <code>useVoiceAgent</code> hook in{" "}
+				<code>@ayjnt/&lt;agentId&gt;</code> that points at the right
+				route path and uses ayjnt's URL shape instead of the SDK's
+				default.
+			</li>
+		</ul>
+
+		<h2>The generated hook</h2>
+		<p>
+			Voice agents get a different client hook than normal agents.
+			Where a regular agent would generate{" "}
+			<code>useAgent</code> from <code>agents/react</code>, a voice
+			agent gets <code>useVoiceAgent</code> from{" "}
+			<code>ayjnt/voice/client</code>:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/@ayjnt/chat/index.ts (generated)"
+			lang="ts"
+			code={`import { useAyjntVoiceAgent } from "ayjnt/voice/client";
+
+export function useVoiceAgent(opts?: {
+  name?: string;
+  host?: string;
+  enabled?: boolean;
+  onReconnect?: () => void;
+}) {
+  return useAyjntVoiceAgent({
+    agent: "chat",
+    routePath: "/chat",  // ← ayjnt's URL shape
+    ...opts,
+  });
+}`}
+		/>
+		<p>
+			Why the wrapper: the upstream <code>useVoiceAgent</code> from{" "}
+			<code>@cloudflare/voice/react</code> hardcodes a{" "}
+			<code>WebSocketVoiceTransport</code> backed by PartySocket, which
+			connects to <code>/agents/&lt;kebab&gt;/&lt;name&gt;</code>.
+			ayjnt's URL shape is{" "}
+			<code>/&lt;route&gt;/&lt;instance&gt;</code>; the wrapper supplies
+			a raw-WebSocket transport that connects to the right URL.
+		</p>
+
+		<h2>Using the hook in your UI</h2>
+		<CodeBlock
+			filename="agents/chat/app.tsx"
+			lang="tsx"
+			code={`import { useVoiceAgent } from "@ayjnt/chat";
+
+export default function VoiceUI() {
+  const voice = useVoiceAgent({ name: "demo" });
+  // voice.connected, voice.listening, voice.speaking, voice.error
+  // voice.start(), voice.stop()
+
+  return (
+    <div>
+      <button onClick={voice.connected ? voice.stop : voice.start}>
+        {voice.connected ? "Stop" : "Talk"}
+      </button>
+      <p>{voice.listening ? "Listening…" : voice.speaking ? "Speaking…" : "Idle"}</p>
+    </div>
+  );
+}`}
+			highlightLines={[1, 4]}
+		/>
+
+		<h2>STT and TTS providers</h2>
+		<p>
+			The voice mixin doesn't pick STT or TTS for you — it expects
+			the agent to expose a <code>voice = {`{ stt, tts }`}</code>{" "}
+			instance field. The most useful providers from{" "}
+			<code>@cloudflare/voice/providers</code>:
+		</p>
+		<ul>
+			<li>
+				<code>WorkersAIFluxSTT</code> — streaming STT against
+				Workers AI's Whisper model.
+			</li>
+			<li>
+				<code>WorkersAITTS</code> — Workers AI's TTS endpoint.
+				Streams audio frames back over the WebSocket.
+			</li>
+		</ul>
+		<p>
+			You can also implement your own STT/TTS interfaces if you want
+			to point at OpenAI, Deepgram, ElevenLabs, etc.
+		</p>
+
+		<h2>onTranscript lifecycle</h2>
+		<p>
+			<code>onTranscript(text)</code> is the central hook. It fires
+			once the STT engine flushes a complete utterance (silence
+			detection + finalization). Whatever string you return is sent
+			to the TTS engine and streamed back to the client as audio.
+		</p>
+		<p>
+			Return <code>undefined</code> to skip the TTS pass — useful
+			when you want to send a state update without speaking.
+		</p>
+
+		<h2>Detection rules</h2>
+		<CodeBlock
+			lang="ts"
+			code={`// ✓ detected
+export default class ChatAgent extends withVoice(Agent)<…> {}
+
+// ✓ detected
+const VoiceAgent = withVoice(Agent);
+export default class ChatAgent extends VoiceAgent<…> {}
+
+// ✗ NOT detected — aliased import
+import { withVoice as wv } from "@cloudflare/voice";
+export default class ChatAgent extends wv(Agent)<…> {}`}
+		/>
+		<p>
+			The detection is source-level regex matching{" "}
+			<code>withVoice(</code> in the file.
+		</p>
+
+		<h2>Why a custom transport</h2>
+		<Callout kind="note" title="The URL shape difference">
+			<p>
+				Upstream <code>WebSocketVoiceTransport</code> uses PartySocket
+				with <code>{`prefix: "agents"`}</code>, which hardcodes a URL
+				shape of <code>/agents/&lt;kebab&gt;/&lt;name&gt;</code>.
+				ayjnt's URL shape is{" "}
+				<code>/&lt;route&gt;/&lt;instance&gt;</code> — flatter, no
+				"agents" segment. The generated hook supplies an{" "}
+				<code>AyjntVoiceTransport</code> that opens a raw WebSocket
+				to the right URL while keeping the upstream message protocol
+				intact.
+			</p>
+		</Callout>
+
+		<h2>Reference</h2>
+		<ul>
+			<li>
+				<a
+					href="https://developers.cloudflare.com/agents/api-reference/voice/"
+					target="_blank"
+					rel="noreferrer"
+					class="link-underline"
+				>
+					Cloudflare's Voice Agents docs
+				</a>
+			</li>
+			<li>
+				<code>examples/voice-agent</code> — ChatAgent + UI from this
+				guide.
+			</li>
+			<li>
+				<code>src/runtime/voiceClient.tsx</code> —{" "}
+				<code>AyjntVoiceTransport</code> + the wrapper hook.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

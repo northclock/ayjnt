@@ -1,0 +1,199 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Browser tools — ayjnt docs"
+	description="Give your agent Browser Rendering tools with one import. ayjnt detects ayjnt/browser and auto-wires BROWSER, LOADER, AI, and nodejs_compat."
+>
+	<DocPageShell
+		slug="guides/browser"
+		lede="Cloudflare's createBrowserTools turns Browser Rendering into an AI-SDK ToolSet — a set of tools an LLM can call to search the web and execute scripted browser sessions. ayjnt wraps it in a zero-config helper: import once, get tools wired, and the framework provisions every binding the runtime needs."
+	>
+		<h2>The one-liner</h2>
+		<CodeBlock
+			filename="agents/research/agent.ts"
+			lang="ts"
+			code={`import { Agent } from "agents";
+import { browserTools } from "ayjnt/browser";    // ← the trigger
+import type { GeneratedEnv } from "@ayjnt/env";
+
+export default class ResearchAgent extends Agent<GeneratedEnv, State> {
+  override async onRequest(req: Request): Promise<Response> {
+    const tools = browserTools(this);             // → AI-SDK ToolSet
+    // pass tools to generateText() / streamText() etc.
+    return Response.json({ tools: Object.keys(tools) });
+  }
+}`}
+			highlightLines={[2, 7]}
+		/>
+
+		<h2>What ayjnt wires up</h2>
+		<p>
+			The build picks up{" "}
+			<code>import {`{ browserTools }`} from "ayjnt/browser"</code>{" "}
+			(or <code>createBrowserTools</code> — both trigger the
+			same detection) and adds four pieces of plumbing to{" "}
+			<code>.ayjnt/dist/wrangler.jsonc</code>:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/wrangler.jsonc (generated)"
+			lang="jsonc"
+			code={`{
+  "compatibility_flags": ["nodejs_compat"],     // Loader runtime requirement
+  "browser":         { "binding": "BROWSER" },  // Browser Rendering
+  "worker_loaders":  [{ "binding": "LOADER" }], // sandboxed CDP execution
+  "ai":              { "binding": "AI" }        // model for the tools
+}`}
+		/>
+		<p>
+			It also augments <code>.ayjnt/env.d.ts</code> with typed{" "}
+			<code>BROWSER</code>, <code>LOADER</code>, and <code>AI</code>{" "}
+			fields on <code>GeneratedEnv</code>, so reading them inside the
+			agent (via <code>this.env.BROWSER</code> etc.) autocompletes.
+		</p>
+		<Callout kind="note" title="Why all four">
+			<p>
+				Forget any of those four pieces in a hand-rolled{" "}
+				<code>wrangler.jsonc</code> and the runtime fails in opaque
+				ways. That's why ayjnt hooks them up the moment it sees the
+				import — there's no good reason to import{" "}
+				<code>ayjnt/browser</code> without all of these.
+			</p>
+		</Callout>
+
+		<h2>What you get back</h2>
+		<p>
+			<code>browserTools(this, options?)</code> returns the same{" "}
+			<code>ToolSet</code> shape Cloudflare's{" "}
+			<code>createBrowserTools</code> returns — tools keyed by name
+			like <code>browser_search</code>, <code>browser_execute</code>{" "}
+			and ready to drop straight into{" "}
+			<code>generateText({`{ model, tools, prompt }`})</code>:
+		</p>
+		<CodeBlock
+			lang="ts"
+			code={`import { generateText } from "ai";
+import { createWorkersAI } from "workers-ai-provider";
+
+const tools = browserTools(this);
+const ai = createWorkersAI({ binding: this.env.AI });
+
+const result = await generateText({
+  model: ai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+  tools,
+  prompt: "What's the current weather in Tokyo?",
+  maxSteps: 5,
+});`}
+		/>
+
+		<h2>Options</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Argument</th>
+					<th>Type</th>
+					<th>Purpose</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td><code>agent</code></td>
+					<td>the agent instance (<code>this</code>)</td>
+					<td>Reads <code>agent.env.BROWSER</code> and <code>agent.env.LOADER</code></td>
+				</tr>
+				<tr>
+					<td><code>options.cdpUrl?</code></td>
+					<td><code>string</code></td>
+					<td>Override CDP endpoint (e.g. local Chromium for dev)</td>
+				</tr>
+				<tr>
+					<td><code>options.cdpHeaders?</code></td>
+					<td><code>Record&lt;string, string&gt;</code></td>
+					<td>Headers for the CDP URL (e.g. Cloudflare Access)</td>
+				</tr>
+				<tr>
+					<td><code>options.timeout?</code></td>
+					<td><code>number</code></td>
+					<td>Per-tool execution timeout, default 30000ms</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>Comparison: raw vs ayjnt</h2>
+		<CodeBlock
+			lang="ts"
+			code={`// without ayjnt/browser:
+import { createBrowserTools } from "agents/browser/ai";
+const tools = createBrowserTools({
+  browser: env.BROWSER,
+  loader:  env.LOADER,
+});
+// + remember to add browser + worker_loaders + ai + nodejs_compat
+// to wrangler.jsonc by hand. Miss one — opaque runtime error.
+
+// with ayjnt/browser:
+import { browserTools } from "ayjnt/browser";
+const tools = browserTools(this);
+// framework handles wrangler.jsonc and env.d.ts.`}
+		/>
+		<p>
+			Both APIs are exported from <code>ayjnt/browser</code> — the
+			detection fires on either name, so use whichever fits your
+			style. <code>browserTools(this, ...)</code> is the shortcut;{" "}
+			<code>createBrowserTools({`{ browser, loader }`})</code> is the
+			explicit form.
+		</p>
+
+		<h2>Production caveats</h2>
+		<ul>
+			<li>
+				<strong>Browser Rendering must be enabled</strong> on your
+				Cloudflare account (free tier supports it for development).
+			</li>
+			<li>
+				<strong><code>@cloudflare/codemode</code></strong> is a peer
+				dependency of the agents SDK's browser tools — installed by
+				the example automatically.
+			</li>
+			<li>
+				<strong>No-binding fallback for local dev</strong>: pass{" "}
+				<code>cdpUrl</code> to{" "}
+				<code>browserTools(this, {`{ cdpUrl: "http://localhost:9222" }`})</code>{" "}
+				to point at a local Chromium when Browser Rendering isn't
+				wired up.
+			</li>
+		</ul>
+
+		<h2>Co-located UI</h2>
+		<p>
+			The example ships an <code>app.tsx</code> next to the agent:{" "}
+			<code>useAgent()</code> from <code>@ayjnt/research</code> opens a
+			WebSocket, the form calls a <code>@callable investigate(question)</code>{" "}
+			method, and the rendered list of registered tool names proves
+			the framework provisioned BROWSER + LOADER + AI correctly.
+			Swap in <code>generateText({"{ tools, ... }"})</code> inside{" "}
+			<code>investigate</code> when you're ready for real LLM output.
+		</p>
+
+		<h2>Reference</h2>
+		<ul>
+			<li>
+				<a
+					href="https://developers.cloudflare.com/agents/api-reference/browse-the-web/"
+					target="_blank"
+					rel="noreferrer"
+					class="link-underline"
+				>
+					Cloudflare's Browser Rendering docs
+				</a>
+			</li>
+			<li>
+				<code>examples/browser-tools</code> — full agent + UI with{" "}
+				<code>generateText</code> integration sketched out.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

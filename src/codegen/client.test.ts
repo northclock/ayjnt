@@ -23,13 +23,30 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     hasApp: false,
     hasDocs: false,
     callables: [],
+    hasOnEmail: false,
+    isVoice: false,
     middlewareChain: [],
     ...overrides,
   };
 }
 
-function mf(agents: AgentEntry[]): Manifest {
-  return { root: "/fake", agents };
+function mf(
+  agents: AgentEntry[],
+  features: Partial<Manifest["features"]> = {},
+  workflows: Manifest["workflows"] = [],
+): Manifest {
+  return {
+    root: "/fake",
+    agents,
+    workflows,
+    features: {
+      browser: false,
+      email: false,
+      emailResolverFile: null,
+      voice: false,
+      ...features,
+    },
+  };
 }
 
 describe("generateTsconfig", () => {
@@ -145,6 +162,38 @@ describe("generateClientHook", () => {
     );
     // No State generic on the wrapper itself — bare useAgent() call.
     expect(out).toMatch(/export function useAgent\(\s*options/);
+  });
+
+  test("isVoice agent emits useVoiceAgent (not useAgent) via ayjnt/voice/client", () => {
+    // Voice agents need a different hook entirely: useVoiceAgent from
+    // @cloudflare/voice/react with ayjnt's custom transport. The
+    // generated wrapper hides that switch from the user — they always
+    // call useVoiceAgent() in their app.tsx regardless of how it's
+    // wired underneath.
+    const out = generateClientHook(
+      agent({
+        isVoice: true,
+        className: "ChatVoice",
+        routePath: "/voice-chat",
+      }),
+      "/fake/.ayjnt/client/voice-chat/index.tsx",
+    );
+    // Imports the wrapper hook + transport class from ayjnt/voice/client,
+    // NOT useAgent from agents/react. AyjntVoiceTransport is a class
+    // (value import), so re-exporting it works under verbatimModuleSyntax.
+    expect(out).toContain(`from "ayjnt/voice/client"`);
+    expect(out).toContain(`useAyjntVoiceAgent`);
+    expect(out).toContain(`AyjntVoiceTransport`);
+    expect(out).not.toContain(`from "agents/react"`);
+    // Pre-binds class name + routePath so the user call is bare.
+    expect(out).toContain(`agent: "ChatVoice"`);
+    expect(out).toContain(`routePath: "/voice-chat"`);
+    // Re-exports the transport so users who need framework-agnostic
+    // voice clients can import it from `@ayjnt/<route>`.
+    expect(out).toContain(`export { AyjntVoiceTransport }`);
+    // The exported hook is named `useVoiceAgent` (not `useAgent`) so
+    // there's no ambiguity at the call site.
+    expect(out).toContain(`export function useVoiceAgent(`);
   });
 });
 

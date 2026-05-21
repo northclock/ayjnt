@@ -37,7 +37,7 @@
 
 import * as path from "node:path";
 import type { Manifest } from "../core/types.ts";
-import { isMcpAgent } from "./scan.ts";
+import { classNameToKebab, isMcpAgent } from "./scan.ts";
 
 export type EntryOptions = {
   /** Absolute path where the generated entry.ts will be written. Used to
@@ -62,6 +62,12 @@ export function generateEntry(
   const assetRoutes = options.assetRoutes ?? {};
   const docsByBinding = options.docs ?? {};
   const hasApps = Object.keys(assetRoutes).length > 0;
+  const emailEnabled = manifest.features.email;
+  const emailResolverFile = manifest.features.emailResolverFile;
+  // Email handlers route by the local part of the `to` address — see
+  // the email block lower in the generated entry for the resolver logic.
+  // The map below is built only for agents that implement onEmail.
+  const emailRoutes = agents.filter((a) => a.hasOnEmail);
 
   // Collect unique middleware files across all agents, preserving first-seen
   // order. Each gets a stable `mw_<N>` import name.
@@ -93,6 +99,50 @@ export function generateEntry(
     agents.length === 0
       ? "// (no agents discovered)"
       : `export { ${agents.map((a) => a.className).join(", ")} };`;
+
+  // Workflows discovered under workflow.ts files. Imported + re-exported
+  // the same way agents are so wrangler's `workflows: [{ class_name }]`
+  // entries find them on the module boundary. Workflows don't appear
+  // in the route table or middleware chain — they're triggered by
+  // `this.runWorkflow("BINDING", ...)` calls from agents.
+  const workflows = manifest.workflows;
+  const workflowImports = workflows
+    .map((w) => {
+      const rel = toImportSpec(outDir, w.sourceFile);
+      return `import ${w.className} from "${rel}";`;
+    })
+    .join("\n");
+  const workflowReexports =
+    workflows.length === 0
+      ? ""
+      : `export { ${workflows.map((w) => w.className).join(", ")} };`;
+
+  // For agents that have a co-located workflow.ts, pair the agent with
+  // its workflow by shared parent directory and inject the binding name
+  // onto the agent's prototype. The `withWorkflow` mixin reads this at
+  // call time so users can write `this.workflow(params)` without a
+  // magic binding string — the framework already knows the pairing.
+  //
+  // Folder-based pairing is the convention: `agents/orders/agent.ts`
+  // pairs with `agents/orders/workflow.ts`. A workflow with no co-located
+  // agent (e.g. a fire-and-forget batch under `workflows/` or one paired
+  // by name only) skips this step — the user falls back to the SDK's
+  // `runWorkflow("BINDING", params)` call.
+  const workflowBindingPatches = workflows
+    .map((w) => {
+      const workflowDir = path.dirname(w.sourceFile);
+      const pairedAgent = agents.find(
+        (a) => path.dirname(a.sourceFile) === workflowDir,
+      );
+      if (!pairedAgent) return null;
+      // Direct prototype assignment. The property is non-enumerable so
+      // it doesn't show up in user-facing serialization (e.g. when state
+      // is JSON-stringified). Cast to any because we're patching an
+      // SDK-owned class shape that doesn't declare this property.
+      return `Object.defineProperty(${pairedAgent.className}.prototype, "__ayjntWorkflowBinding", { value: ${JSON.stringify(w.binding)}, enumerable: false });`;
+    })
+    .filter((s): s is string => s !== null)
+    .join("\n");
 
   const middlewareImports = [...middlewareIndex.entries()]
     .map(([file, i]) => `import mw_${i} from "${toImportSpec(outDir, file)}";`)
@@ -141,17 +191,41 @@ export function generateEntry(
 
   // Env is the DO bindings plus, if any agent has an app.tsx, the ASSETS
   // Fetcher binding wrangler provisions from the assets config.
-  const envType = hasApps
-    ? `Record<Binding, DurableObjectNamespace> & { ASSETS: Fetcher }`
-    : `Record<Binding, DurableObjectNamespace>`;
+  // Email — the entry imports `routeAgentEmail` and either the user's
+  // custom resolver (if email.ts exists at the workspace root) or
+  // uses a manifest-derived inline resolver. See the email() worker
+  // method below for the dispatch shape.
+  const emailImport = emailEnabled
+    ? `import { routeAgentEmail } from "agents";\n`
+    : "";
+  const customResolverImport =
+    emailEnabled && emailResolverFile
+      ? `import customEmailResolver from "${toImportSpec(outDir, emailResolverFile)}";\n`
+      : "";
+
+  // Env carries the SendEmail binding when the feature is on so
+  // `env.EMAIL` is reachable inside agents (this.env.EMAIL). The
+  // composed type union is built here to keep the literal generator
+  // template readable.
+  const envExtras: string[] = [];
+  if (hasApps) envExtras.push("ASSETS: Fetcher");
+  if (emailEnabled) envExtras.push("EMAIL: SendEmail");
+  const envType =
+    envExtras.length > 0
+      ? `Record<Binding, DurableObjectNamespace> & { ${envExtras.join("; ")} }`
+      : `Record<Binding, DurableObjectNamespace>`;
 
   return `// GENERATED by ayjnt — do not edit. Regenerated on every build.
 import { getAgentByName } from "agents";
-import { compose, createContext, type Middleware } from "ayjnt/middleware";
+${emailImport}${customResolverImport}import { compose, createContext, type Middleware } from "ayjnt/middleware";
 ${middlewareImports}
 ${agentImports}
+${workflowImports}
 
 ${agentReexports}
+${workflowReexports}
+
+${workflowBindingPatches}
 
 type Binding = ${bindingUnion};
 
@@ -444,8 +518,70 @@ export default {
       params: ctxParams,
     });
     return compose(match.middleware, c, finalize);
-  },
+  },${
+    emailEnabled
+      ? `
+
+  /**
+   * Email worker handler — invoked by Cloudflare's Email Routing rule
+   * configured in the dashboard. Routes the inbound message to the
+   * agent class that implements onEmail(), keyed by the local part of
+   * the \`to\` address:
+   *
+   *   support@yourdomain.com           → SupportAgent (instance "default")
+   *   support+room-42@yourdomain.com   → SupportAgent (instance "room-42")
+   *
+   * Sub-addressing (the \`+suffix\` form) is the standard RFC-5233 way
+   * to pin instance ids without changing the bound address.
+   *
+   * Users who need a different resolution scheme can drop an \`email.ts\`
+   * at the workspace root that default-exports an \`EmailResolver\` —
+   * the codegen detects the file and imports it here instead.
+   */
+  async email(
+    message: ForwardableEmailMessage,
+    env: Env,
+    executionCtx: ExecutionContext,
+  ): Promise<void> {
+    await routeAgentEmail(message, env, {
+      resolver: ${emailResolverFile ? "customEmailResolver" : "defaultEmailResolver"},
+    });
+  },`
+      : ""
+  }
+};${
+    emailEnabled && !emailResolverFile
+      ? `
+
+/** Manifest-derived default resolver. Maps the local-part of the email's
+ *  \`to\` address to an agent route (without leading slash), pulling an
+ *  optional instance id from a \`+suffix\` sub-address. */
+const EMAIL_ROUTES: Record<string, { agentName: string }> = {
+${emailRoutes
+  .map(
+    (a) =>
+      `  ${JSON.stringify(a.routePath.slice(1))}: { agentName: ${JSON.stringify(classNameToKebab(a.className))} },`,
+  )
+  .join("\n")}
 };
+
+async function defaultEmailResolver(
+  message: ForwardableEmailMessage,
+): Promise<{ agentName: string; agentId: string } | null> {
+  const to = message.to ?? "";
+  const at = to.indexOf("@");
+  const local = at >= 0 ? to.slice(0, at) : to;
+  // RFC 5233 sub-addressing: \`route+instance@host\`. Without a +suffix
+  // we fall back to the canonical "default" DO instance.
+  const plus = local.indexOf("+");
+  const route = plus >= 0 ? local.slice(0, plus) : local;
+  const instance = plus >= 0 ? local.slice(plus + 1) : "default";
+  const entry = EMAIL_ROUTES[route.toLowerCase()];
+  if (!entry) return null;
+  return { agentName: entry.agentName, agentId: instance };
+}`
+      : ""
+  }
 
 /** Binding → route prefix. Used for MCP dispatch (McpAgent.serve needs the
  *  path prefix as its first argument). */

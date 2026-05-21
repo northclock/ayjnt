@@ -1,0 +1,328 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Workflows — ayjnt docs"
+	description="Pair an agent with a durable Cloudflare Workflow by dropping a workflow.ts next to agent.ts. Zero config — bindings, RPC stubs, and typed env all wired automatically."
+>
+	<DocPageShell
+		slug="guides/workflows"
+		lede="Workflows are Cloudflare's durable-execution primitive — each step persists its return value, retries on failure with backoff, and resumes from the last completed step after a worker restart. ayjnt detects workflow.ts files automatically and wires the workflow binding, the typed RPC stub, and the GeneratedEnv field."
+	>
+		<h2>Why pair workflows with agents</h2>
+		<p>
+			Agents own state. Workflows own multi-step durable execution.
+			Pair them when you have a long-running task — order processing,
+			ETL, a multi-step API call chain — that should survive worker
+			restarts and retry with backoff. The agent stores the
+			"what" (the order, the job record); the workflow runs the
+			"how" (mark processing → reserve → charge → mark complete).
+		</p>
+
+		<h2>The file convention</h2>
+		<CodeBlock
+			filename="agents/orders/ (file tree)"
+			lang="text"
+			code={`agents/
+└── orders/
+    ├── agent.ts        ← OrdersAgent (Durable Object)
+    └── workflow.ts     ← OrdersProcessing  (the trigger)`}
+		/>
+		<p>
+			Drop a file named <code>workflow.ts</code> next to your{" "}
+			<code>agent.ts</code>. The default-exported class must extend{" "}
+			<code>AgentWorkflow</code> from <code>agents/workflows</code> (or{" "}
+			<code>WorkflowEntrypoint</code> from{" "}
+			<code>cloudflare:workers</code> for workflows that don't need
+			agent RPC). ayjnt scans the tree, derives the binding name and
+			workflow name from the class name, and emits the
+			<code>wrangler.jsonc</code> entry.
+		</p>
+
+		<h2>A minimal workflow</h2>
+		<CodeBlock
+			filename="agents/orders/workflow.ts"
+			lang="ts"
+			code={`import { AgentWorkflow } from "agents/workflows";
+import type { AgentWorkflowEvent } from "agents/workflows";
+import type { WorkflowStep } from "cloudflare:workers";
+import type OrdersAgent from "./agent.ts";
+
+type Params = {
+  orderId: string;
+  sku: string;
+  qty: number;
+  customerId: string;
+};
+
+export default class OrdersProcessing extends AgentWorkflow<OrdersAgent, Params> {
+  async run(
+    event: Readonly<AgentWorkflowEvent<Params>>,
+    step: WorkflowStep,
+  ): Promise<{ orderId: string; charged: boolean }> {
+    const { orderId, sku, qty, customerId } = event.payload;
+
+    // Each step.do is a durable boundary. Re-runs from here on failure.
+    await step.do("mark-processing", async () => {
+      await this.agent.markStatus(orderId, "processing");
+    });
+
+    const reserved = await step.do("reserve-inventory", async () => {
+      if (qty <= 0) throw new Error("qty must be positive");
+      return { sku, qty, reservation: crypto.randomUUID() };
+    });
+
+    // step.sleep survives restarts.
+    await step.sleep("payment-clearance-delay", "2 seconds");
+
+    const charged = await step.do("charge-customer", async () => {
+      return { customerId, amount: qty * 9.99, txn: crypto.randomUUID() };
+    });
+
+    await step.do("mark-complete", async () => {
+      await this.agent.markStatus(orderId, "complete");
+    });
+
+    return { orderId, charged: !!charged };
+  }
+}`}
+			highlightLines={[1, 2, 13, 16]}
+		/>
+		<p>
+			The <code>{`<OrdersAgent, Params>`}</code> generics give you
+			fully typed RPC on <code>this.agent</code> — calling{" "}
+			<code>this.agent.markStatus(...)</code> autocompletes and is
+			checked against the Agent's signature.
+		</p>
+
+		<h2>Triggering a workflow from an agent</h2>
+		<CodeBlock
+			filename="agents/orders/agent.ts"
+			lang="ts"
+			code={`import { Agent } from "agents";
+import { withWorkflow } from "ayjnt/workflow";
+import type { GeneratedEnv } from "@ayjnt/env";
+import type OrdersProcessing from "./workflow.ts";
+
+export default class OrdersAgent
+  extends withWorkflow<typeof OrdersProcessing>()(Agent)<GeneratedEnv, State>
+{
+  override async onRequest(req: Request): Promise<Response> {
+    const { sku, qty, customerId } = await req.json();
+    const orderId = crypto.randomUUID();
+
+    this.setState({
+      orders: [...this.state.orders, { id: orderId, sku, qty, status: "queued" }],
+    });
+
+    // No magic binding string — params are typed against
+    // OrdersProcessing's Params generic. IntelliSense knows the shape.
+    const workflowId = await this.workflow({ orderId, sku, qty, customerId });
+
+    return Response.json({ orderId, workflowId });
+  }
+
+  // The workflow calls this back via this.agent.markStatus(...)
+  async markStatus(orderId: string, status: Status): Promise<void> {
+    this.setState({ /* update DO state */ });
+  }
+}`}
+			highlightLines={[2, 4, 7, 17]}
+		/>
+		<p>
+			<code>withWorkflow&lt;typeof OrdersProcessing&gt;()(Agent)</code>{" "}
+			is the mixin that adds a typed <code>this.workflow(params)</code>{" "}
+			method. The framework derived the binding name (<code>ORDERS_PROCESSING</code>)
+			from the co-located <code>workflow.ts</code> at build time and
+			patched it onto the agent's prototype — so user code never has
+			to spell the binding string. Params are checked against the
+			workflow's <code>Params</code> generic; rename a field in{" "}
+			<code>workflow.ts</code> and every call site lights up red.
+		</p>
+		<p>
+			If you need to trigger a workflow that isn't co-located with
+			the agent (e.g. a fire-and-forget batch under a separate{" "}
+			<code>workflows/</code> tree), use the SDK's{" "}
+			<code>this.runWorkflow("BINDING_NAME", params)</code> directly —{" "}
+			<code>withWorkflow</code> is purely an ergonomic shortcut for
+			the co-located case.
+		</p>
+
+		<h2>What ayjnt wires up</h2>
+		<p>
+			One <code>workflow.ts</code> file produces three pieces of
+			generated code:
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/wrangler.jsonc (generated)"
+			lang="jsonc"
+			code={`"workflows": [
+  {
+    "name": "orders-processing",
+    "binding": "ORDERS_PROCESSING",
+    "class_name": "OrdersProcessing"
+  }
+]`}
+		/>
+		<CodeBlock
+			filename=".ayjnt/dist/entry.ts (generated)"
+			lang="ts"
+			code={`import OrdersProcessing from "../../agents/orders/workflow.ts";
+export { OrdersProcessing };  // Cloudflare runtime registers the class`}
+		/>
+		<CodeBlock
+			filename=".ayjnt/env.d.ts (generated)"
+			lang="ts"
+			code={`export type GeneratedEnv = {
+  ORDERS_AGENT: DurableObjectNamespace<OrdersAgent>;
+  ORDERS_PROCESSING: Workflow;  // ← workflow binding, typed
+};`}
+		/>
+
+		<h2>Name derivation</h2>
+		<p>
+			The class name drives everything else:
+		</p>
+		<ul>
+			<li>
+				<code>OrdersProcessing</code> →{" "}
+				<code>binding: "ORDERS_PROCESSING"</code> (UPPER_SNAKE)
+			</li>
+			<li>
+				<code>OrdersProcessing</code> →{" "}
+				<code>name: "orders-processing"</code> (kebab)
+			</li>
+			<li>
+				<code>OrdersProcessing</code> →{" "}
+				<code>class_name: "OrdersProcessing"</code> (verbatim)
+			</li>
+		</ul>
+		<p>
+			Bindings must be unique across agents and workflows; the scanner
+			throws a clear error if two classes would collide (e.g. an
+			<code>OrdersAgent</code> and an <code>OrdersAgent</code>{" "}
+			workflow class would both want <code>ORDERS_AGENT</code>).
+		</p>
+
+		<h2>Workflows are not Durable Objects</h2>
+		<Callout kind="note" title="No migrations">
+			<p>
+				Workflows have NO entries in the <code>migrations[]</code>{" "}
+				array — they're ephemeral execution containers, not Durable
+				Objects. State lives in the paired Agent's DO. The framework
+				reflects this: workflow classes only appear under{" "}
+				<code>workflows[]</code> in <code>wrangler.jsonc</code>, never
+				in <code>durable_objects.bindings</code> or{" "}
+				<code>migrations[]</code>.
+			</p>
+		</Callout>
+
+		<h2>Step naming matters</h2>
+		<p>
+			<code>step.do("name", fn)</code> keys the persisted result by
+			name. Renaming a step in a deployed workflow makes the runtime
+			think it's a new step and re-execute it on resume. Keep step
+			names stable across deploys — treat them like database column
+			names.
+		</p>
+
+		<h2>The agent ⇄ workflow loop</h2>
+		<p>The recommended pattern:</p>
+		<ol>
+			<li>
+				Agent receives a request, inserts a record at{" "}
+				<code>queued</code>, calls <code>this.runWorkflow(...)</code>.
+			</li>
+			<li>
+				Workflow runs durably, calls back into the agent via{" "}
+				<code>this.agent.&lt;method&gt;(...)</code> (typed RPC) to
+				update milestones.
+			</li>
+			<li>
+				Agent's <code>setState</code> broadcasts to connected
+				WebSocket clients — the UI watches state change in real time.
+			</li>
+		</ol>
+
+		<h2>WorkflowEntrypoint vs AgentWorkflow</h2>
+		<p>
+			ayjnt detects both. Use <code>AgentWorkflow</code> when you want
+			typed RPC back to the originating agent (most cases). Use plain{" "}
+			<code>WorkflowEntrypoint</code> (from{" "}
+			<code>cloudflare:workers</code>) when the workflow doesn't need
+			to talk back to an agent — e.g. a fire-and-forget batch job
+			triggered from a cron.
+		</p>
+
+		<h2>Detection rules</h2>
+		<CodeBlock
+			lang="ts"
+			code={`// ✓ detected
+export default class OrdersProcessing extends AgentWorkflow<…> {}
+
+// ✓ detected
+export default class Cleanup extends WorkflowEntrypoint<…> {}
+
+// ✗ NOT detected — base class is "AW", not "AgentWorkflow"
+import { AgentWorkflow as AW } from "agents/workflows";
+export default class X extends AW<…> {}
+
+// ✗ NOT detected — not the default export
+export class OrdersProcessing extends AgentWorkflow<…> {}`}
+		/>
+		<p>
+			The detection is source-level regex; keep the import plain and
+			the class default-exported.
+		</p>
+
+		<h2>Looking up a running workflow</h2>
+		<CodeBlock
+			lang="ts"
+			code={`// Inside the agent
+const instance = await this.env.ORDERS_PROCESSING.get(workflowId);
+const status = await instance.status();
+// → { status: "running" | "complete" | "errored" | ..., output?: ... }`}
+		/>
+		<p>
+			The <code>Workflow</code> binding type comes from{" "}
+			<code>@cloudflare/workers-types</code> and is automatically
+			added to <code>GeneratedEnv</code> by ayjnt.
+		</p>
+
+		<h2>Co-located UI</h2>
+		<p>
+			Workflows pair nicely with a live status board. The example's{" "}
+			<code>agents/orders/app.tsx</code> uses{" "}
+			<code>useAgent()</code> from <code>@ayjnt/orders</code> to watch
+			the order list, calls the agent's{" "}
+			<code>@callable placeOrder(...)</code> on form submit, and
+			renders each row's status flipping through{" "}
+			<em>queued → processing → complete</em> in real time. The
+			workflow's <code>step.do(...)</code> blocks RPC back into the
+			agent's <code>markStatus</code> method, and{" "}
+			<code>setState</code> broadcasts each update over the
+			WebSocket.
+		</p>
+
+		<h2>Reference</h2>
+		<ul>
+			<li>
+				<a
+					href="https://developers.cloudflare.com/agents/api-reference/run-workflows/"
+					target="_blank"
+					rel="noreferrer"
+					class="link-underline"
+				>
+					Cloudflare's Workflow + Agents docs
+				</a>
+			</li>
+			<li>
+				<code>examples/workflows</code> — the OrdersAgent + OrdersProcessing pair
+				plus the React status board this guide is based on.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

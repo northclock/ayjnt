@@ -28,13 +28,20 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     hasApp: false,
     hasDocs: false,
     callables: [],
+    hasOnEmail: false,
+    isVoice: false,
     middlewareChain: [],
     ...overrides,
   };
 }
 
 function manifestOf(agents: AgentEntry[]): Manifest {
-  return { root: "/fake", agents };
+  return {
+    root: "/fake",
+    agents,
+    workflows: [],
+    features: { browser: false, email: false, emailResolverFile: null, voice: false },
+  };
 }
 
 describe("nextTag", () => {

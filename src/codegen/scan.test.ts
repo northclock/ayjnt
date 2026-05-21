@@ -5,8 +5,12 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
   classNameToBinding,
+  classNameToKebab,
   defaultAgentId,
+  detectOnEmail,
+  detectWithVoice,
   folderToRoute,
+  importsAyjntBrowser,
   parseAgentSource,
   parseCallables,
   resolveMiddlewareChain,
@@ -225,7 +229,33 @@ describe("scan (integration)", () => {
     const empty = mkdtempSync(path.join(tmpdir(), "ayjnt-empty-"));
     const manifest = await scan(empty);
     expect(manifest.agents).toEqual([]);
+    expect(manifest.workflows).toEqual([]);
+    expect(manifest.features).toEqual({
+      browser: false,
+      email: false,
+      emailResolverFile: null,
+      voice: false,
+    });
     rmSync(empty, { recursive: true, force: true });
+  });
+
+  test("default fixture has no browser feature flag", async () => {
+    // None of the fixture agents import from "ayjnt/browser", so the
+    // flag stays off and wrangler won't add browser bindings.
+    const manifest = await scan(tmp);
+    expect(manifest.features.browser).toBe(false);
+  });
+
+  test("features.browser flips when any agent imports ayjnt/browser", async () => {
+    const tmp2 = mkdtempSync(path.join(tmpdir(), "ayjnt-browser-"));
+    await mkdir(path.join(tmp2, "agents/research"), { recursive: true });
+    await writeFile(
+      path.join(tmp2, "agents/research/agent.ts"),
+      `import { browserTools } from "ayjnt/browser";\nexport default class ResearchAgent extends Agent<Env, State> {}`,
+    );
+    const manifest = await scan(tmp2);
+    expect(manifest.features.browser).toBe(true);
+    rmSync(tmp2, { recursive: true, force: true });
   });
 });
 
@@ -543,5 +573,245 @@ describe("resolveMiddlewareChain edge cases", () => {
     );
     expect(chain).toEqual([]);
     rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("importsAyjntBrowser", () => {
+  test("detects double-quoted import", () => {
+    expect(
+      importsAyjntBrowser(`import { browserTools } from "ayjnt/browser";`),
+    ).toBe(true);
+  });
+
+  test("detects single-quoted import", () => {
+    expect(
+      importsAyjntBrowser(`import { browserTools } from 'ayjnt/browser';`),
+    ).toBe(true);
+  });
+
+  test("detects side-effect import", () => {
+    expect(importsAyjntBrowser(`import "ayjnt/browser";`)).toBe(true);
+  });
+
+  test("does not match unrelated imports", () => {
+    expect(
+      importsAyjntBrowser(`import { Agent } from "agents";`),
+    ).toBe(false);
+    expect(
+      importsAyjntBrowser(`import { other } from "ayjnt/middleware";`),
+    ).toBe(false);
+  });
+
+  test("does not match the same string in a comment", () => {
+    // Block + line comments stripped before detection so a doc string
+    // mentioning the import path doesn't trigger the binding-injection
+    // side effects.
+    const src = `
+      /**
+       * Example:
+       *   import { browserTools } from "ayjnt/browser";
+       */
+      // import { browserTools } from "ayjnt/browser"; (uncomment to enable)
+      import { Agent } from "agents";
+    `;
+    expect(importsAyjntBrowser(src)).toBe(false);
+  });
+
+  test("does not match strings inside JSX or other content", () => {
+    // The regex anchors on `from`, so an inline string with the path
+    // shouldn't match.
+    const src = `const docUrl = "see ayjnt/browser for setup details";`;
+    expect(importsAyjntBrowser(src)).toBe(false);
+  });
+});
+
+describe("detectOnEmail", () => {
+  test("matches a plain onEmail method", () => {
+    const src = `
+      class A {
+        async onEmail(email: AgentEmail) {
+          return;
+        }
+      }
+    `;
+    expect(detectOnEmail(src)).toBe(true);
+  });
+
+  test("matches override async onEmail", () => {
+    const src = `
+      class A {
+        override async onEmail(email: AgentEmail): Promise<void> {}
+      }
+    `;
+    expect(detectOnEmail(src)).toBe(true);
+  });
+
+  test("matches public/protected modifiers", () => {
+    const src = `
+      class A {
+        public async onEmail() {}
+      }
+    `;
+    expect(detectOnEmail(src)).toBe(true);
+  });
+
+  test("does not match a field or variable named onEmail", () => {
+    // We require `onEmail(` — distinguishes from `onEmail = …` or
+    // `const onEmail = …` which aren't methods.
+    expect(detectOnEmail(`const onEmail = "foo";`)).toBe(false);
+    expect(detectOnEmail(`onEmail: () => void;`)).toBe(false);
+  });
+
+  test("does not match onEmail mentioned only in a comment", () => {
+    const src = `
+      /** Implements onEmail — see docs. */
+      // onEmail(email) — handler signature
+      class A {}
+    `;
+    expect(detectOnEmail(src)).toBe(false);
+  });
+
+  test("does not match a different method with onEmail substring", () => {
+    expect(detectOnEmail(`async addonEmail() {}`)).toBe(false);
+    expect(detectOnEmail(`async onEmails() {}`)).toBe(false);
+  });
+});
+
+describe("parseWorkflowSource + scanWorkflows", () => {
+  test("detects an AgentWorkflow subclass", async () => {
+    // Import lazily inside the test so the top-level imports stay flat.
+    const { parseWorkflowSource } = await import("./scan.ts");
+    const src = `
+      import { AgentWorkflow } from "agents/workflows";
+      export default class MyFlow extends AgentWorkflow<MyAgent, Params> {}
+    `;
+    expect(parseWorkflowSource(src)).toEqual({
+      className: "MyFlow",
+      baseClass: "AgentWorkflow",
+    });
+  });
+
+  test("detects a WorkflowEntrypoint subclass (raw Cloudflare Workflow)", async () => {
+    const { parseWorkflowSource } = await import("./scan.ts");
+    const src = `
+      import { WorkflowEntrypoint } from "cloudflare:workers";
+      export default class Pure extends WorkflowEntrypoint<Env> {}
+    `;
+    expect(parseWorkflowSource(src)).toEqual({
+      className: "Pure",
+      baseClass: "WorkflowEntrypoint",
+    });
+  });
+
+  test("returns null for files that don't look like workflows", async () => {
+    const { parseWorkflowSource } = await import("./scan.ts");
+    expect(parseWorkflowSource(`const x = 1;`)).toBeNull();
+    expect(
+      parseWorkflowSource(
+        `export default class Whatever extends SomethingElse {}`,
+      ),
+    ).toBeNull();
+  });
+
+  test("scanWorkflows finds workflow.ts files anywhere under root", async () => {
+    const { scanWorkflows } = await import("./scan.ts");
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-wf-"));
+    // Paired with an agent.
+    await mkdir(path.join(tmp, "agents/orders"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/orders/workflow.ts"),
+      `import { AgentWorkflow } from "agents/workflows";\nexport default class OrdersProcessing extends AgentWorkflow<OrdersAgent> {}`,
+    );
+    // Top-level shared workflow.
+    await mkdir(path.join(tmp, "workflows/cleanup"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "workflows/cleanup/workflow.ts"),
+      `import { AgentWorkflow } from "agents/workflows";\nexport default class NightlyCleanup extends AgentWorkflow {}`,
+    );
+    // A red herring — same filename, but doesn't extend the right base.
+    await mkdir(path.join(tmp, "lib"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "lib/workflow.ts"),
+      `export default class Lib extends UnrelatedBase {}`,
+    );
+
+    const found = await scanWorkflows(tmp);
+    expect(found.map((w) => w.className).sort()).toEqual([
+      "NightlyCleanup",
+      "OrdersProcessing",
+    ]);
+    expect(found.find((w) => w.className === "OrdersProcessing")).toMatchObject({
+      binding: "ORDERS_PROCESSING",
+      name: "orders-processing",
+    });
+
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("workflow + agent with the same binding errors out", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-wf-dup-"));
+    // Both produce the binding "ORDERS" (UPPER_SNAKE collision).
+    await mkdir(path.join(tmp, "agents/orders"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/orders/agent.ts"),
+      `export default class Orders extends Agent {}`,
+    );
+    await writeFile(
+      path.join(tmp, "agents/orders/workflow.ts"),
+      `import { AgentWorkflow } from "agents/workflows";\nexport default class Orders extends AgentWorkflow {}`,
+    );
+    await expect(scan(tmp)).rejects.toThrow(/Duplicate binding "ORDERS"/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("detectWithVoice", () => {
+  test("matches the upstream `class A extends withVoice(Agent)` shape", () => {
+    const src = `
+      import { withVoice } from "@cloudflare/voice";
+      const VoiceAgent = withVoice(Agent);
+      class ChatVoice extends VoiceAgent<Env> {}
+    `;
+    // detectWithVoice imported at the top of the file.
+    expect(detectWithVoice(src)).toBe(true);
+  });
+
+  test("matches direct-in-extends form too", () => {
+    const src = `
+      import { Agent, withVoice } from "@cloudflare/voice";
+      class A extends withVoice(Agent)<Env> {}
+    `;
+    expect(detectWithVoice(src)).toBe(true);
+  });
+
+  test("does not match a substring in a comment", () => {
+    const src = `
+      /** see withVoice() docs for the mixin shape */
+      class A extends Agent<Env> {}
+    `;
+    expect(detectWithVoice(src)).toBe(false);
+  });
+
+  test("does not match unrelated identifiers", () => {
+    expect(detectWithVoice(`class A extends Agent {}`)).toBe(false);
+    expect(detectWithVoice(`const myWithVoice = "foo";`)).toBe(false);
+  });
+});
+
+describe("classNameToKebab", () => {
+  test("simple PascalCase", () => {
+    expect(classNameToKebab("ChatAgent")).toBe("chat-agent");
+  });
+
+  test("multi-word PascalCase", () => {
+    expect(classNameToKebab("AdminUsersAgent")).toBe("admin-users-agent");
+  });
+
+  test("acronym runs stay glued (same trade-off as binding)", () => {
+    expect(classNameToKebab("HTTPServerAgent")).toBe("httpserver-agent");
+  });
+
+  test("single word", () => {
+    expect(classNameToKebab("Foo")).toBe("foo");
   });
 });

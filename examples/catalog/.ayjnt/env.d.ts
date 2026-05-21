@@ -5,7 +5,10 @@ import type OrdersAgent from "../agents/orders/agent.ts";
 import type UsersAgent from "../agents/users/agent.ts";
 
 /**
- * Every Durable Object binding derived from the file tree under agents/.
+ * Every Durable Object binding derived from the file tree under agents/,
+ * plus any feature-flag-derived bindings (BROWSER, LOADER, AI, etc.) the
+ * codegen added because of imports it detected.
+ *
  * Extend this with your own wrangler bindings (KV, R2, vars):
  *
  *   import type { GeneratedEnv } from "@ayjnt/env";

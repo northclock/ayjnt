@@ -1,0 +1,261 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Email — ayjnt docs"
+	description="Agents that receive and reply to email. Define onEmail(message) and ayjnt wires Cloudflare Email Routing, the send_email binding, and address-based dispatch."
+>
+	<DocPageShell
+		slug="guides/email"
+		lede="An ayjnt agent becomes email-capable the moment you add an onEmail(message) method. The framework wires Cloudflare's Email Routing, generates the worker's email() handler, and adds a send_email binding so replyToEmail just works."
+	>
+		<h2>The trigger</h2>
+		<p>
+			Define <code>onEmail(message)</code> on the agent. That's the
+			source-level signal ayjnt scans for. From there the framework
+			fills in every wiring detail.
+		</p>
+		<CodeBlock
+			filename="agents/support/agent.ts"
+			lang="ts"
+			code={`import { Agent } from "agents";
+import type { AgentEmail } from "agents/email";
+import { replyToEmail } from "agents/email";
+import PostalMime from "postal-mime";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type State = { tickets: Array<{ from: string; subject: string }> };
+
+export default class SupportAgent extends Agent<GeneratedEnv, State> {
+  override initialState: State = { tickets: [] };
+
+  async onEmail(message: AgentEmail): Promise<void> {
+    const raw = await message.getRaw();
+    const parsed = await PostalMime.parse(raw);
+
+    this.setState({
+      tickets: [
+        ...this.state.tickets,
+        { from: message.from, subject: parsed.subject ?? "(no subject)" },
+      ],
+    });
+
+    // Reply, using the framework-provided helper.
+    await replyToEmail(message, this.env.EMAIL, {
+      from: "support@example.com",
+      subject: \`Re: \${parsed.subject ?? "your message"}\`,
+      text: "Got it — we'll follow up shortly.",
+    });
+  }
+}`}
+			highlightLines={[12]}
+		/>
+
+		<h2>What ayjnt wires up</h2>
+		<p>
+			Detecting <code>onEmail</code> on any agent flips an{" "}
+			<code>email</code> feature flag. The framework then:
+		</p>
+		<ol>
+			<li>
+				Adds a <code>send_email</code> binding to{" "}
+				<code>wrangler.jsonc</code>:
+				<CodeBlock
+					lang="jsonc"
+					code={`"send_email": [{ "name": "EMAIL", "remote": true }]`}
+				/>
+			</li>
+			<li>
+				Generates an <code>email(message, env, ctx)</code> entry
+				point in <code>.ayjnt/dist/entry.ts</code> that resolves the
+				right agent via address-based routing and forwards the message
+				to its <code>onEmail</code> method.
+			</li>
+			<li>
+				Adds <code>EMAIL: SendEmail</code> to{" "}
+				<code>GeneratedEnv</code> so <code>this.env.EMAIL</code> is
+				typed and autocompletes.
+			</li>
+		</ol>
+
+		<h2>Default address resolver</h2>
+		<p>
+			ayjnt's default resolver uses{" "}
+			<code>createAddressBasedEmailResolver</code> with one route per
+			email-capable agent. The pattern matches the local part of the
+			recipient address against the agent's route path. So an agent
+			at <code>/support</code> answers messages addressed to{" "}
+			<code>support@&lt;your-domain&gt;</code>.
+		</p>
+		<CodeBlock
+			filename=".ayjnt/dist/entry.ts (generated, simplified)"
+			lang="ts"
+			code={`import { routeAgentEmail, createAddressBasedEmailResolver } from "agents";
+import SupportAgent from "../../agents/support/agent.ts";
+
+const defaultEmailResolver = createAddressBasedEmailResolver([
+  { localPart: "support", agent: "SupportAgent" },
+]);
+
+export default {
+  async email(message, env, ctx) {
+    return routeAgentEmail(message, env, ctx, defaultEmailResolver);
+  },
+  // ... fetch handler, etc.
+};`}
+		/>
+
+		<h2>Custom resolver</h2>
+		<p>
+			Drop an <code>email.ts</code> file at the project root to
+			override the default resolver. The file's default export should
+			be a function that returns an agent stub for a given message:
+		</p>
+		<CodeBlock
+			filename="email.ts"
+			lang="ts"
+			code={`import type { AgentEmail } from "agents/email";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+export default async function resolveAgent(
+  message: AgentEmail,
+  env: GeneratedEnv,
+) {
+  // Inspect message.to, headers, subject, body — whatever you want.
+  if (message.to.endsWith("@vip.example.com")) {
+    return env.VIP_SUPPORT_AGENT.get(env.VIP_SUPPORT_AGENT.idFromName("default"));
+  }
+  // Fall through to the default resolver:
+  return null;
+}`}
+		/>
+		<p>
+			When this file is present, the generated <code>entry.ts</code>{" "}
+			imports it and routes through your function first, falling back
+			to the address-based resolver if it returns <code>null</code>.
+		</p>
+
+		<h2>Receiving the raw message</h2>
+		<p>
+			Cloudflare delivers the message as a{" "}
+			<code>ForwardableEmailMessage</code>; the framework wraps it
+			into the SDK's <code>AgentEmail</code> type. The most useful
+			API on it:
+		</p>
+		<ul>
+			<li>
+				<code>message.from</code>, <code>message.to</code> — string
+				addresses.
+			</li>
+			<li>
+				<code>message.headers</code> — a <code>Headers</code>{" "}
+				instance for the raw MIME headers.
+			</li>
+			<li>
+				<code>message.getRaw()</code> → <code>Promise&lt;ArrayBuffer&gt;</code>{" "}
+				— the raw MIME bytes. Parse with{" "}
+				<code>postal-mime</code> for structured body/subject/attachments.
+			</li>
+		</ul>
+
+		<h2>Replying</h2>
+		<p>
+			<code>replyToEmail(message, env.EMAIL, opts)</code> is the
+			SDK helper for replies. It threads the right <code>In-Reply-To</code>{" "}
+			and <code>References</code> headers, picks the right{" "}
+			<code>from</code>, and uses the <code>send_email</code> binding
+			to post the outbound message. Don't use the raw{" "}
+			<code>env.EMAIL.send(...)</code> for replies — the helper
+			handles the conventions a typical email client expects.
+		</p>
+
+		<h2>Cloudflare setup</h2>
+		<Callout kind="warn" title="Email Routing must be configured">
+			<p>
+				The agent only fires when Cloudflare delivers a message to
+				your worker. That means:
+			</p>
+			<ul>
+				<li>
+					<strong>Email Routing must be enabled</strong> on the
+					destination domain (Cloudflare dashboard → Email → Email
+					Routing).
+				</li>
+				<li>
+					<strong>A routing rule</strong> must forward the right
+					address(es) to the worker. ayjnt doesn't create these
+					rules — they live in the Cloudflare dashboard.
+				</li>
+				<li>
+					<strong>For sending</strong>, the <code>from</code> address
+					must be verified in Email Routing's "Destination addresses"
+					— Cloudflare won't send mail from an unverified address.
+				</li>
+			</ul>
+		</Callout>
+
+		<h2>Detection rules</h2>
+		<CodeBlock
+			lang="ts"
+			code={`// ✓ detected
+async onEmail(message: AgentEmail): Promise<void> { ... }
+
+// ✓ detected (no async keyword)
+onEmail(message: AgentEmail) { ... }
+
+// ✗ NOT detected — different method name
+async handleEmail(message: AgentEmail) { ... }
+
+// ✗ NOT detected — declared via field, not method
+onEmail = async (message: AgentEmail) => { ... };`}
+		/>
+		<p>
+			The detection is source-level regex; keep the method
+			declaration plain.
+		</p>
+
+		<h2>Co-located UI</h2>
+		<p>
+			Real inbound email can't easily be exercised in <code>bun run dev</code>,
+			so the example's <code>agents/support/app.tsx</code> includes
+			a "simulate inbound" form that calls a{" "}
+			<code>@callable simulateInboundEmail(from, subject)</code> on the
+			agent. It mirrors the same <code>setState</code> write{" "}
+			<code>onEmail</code> performs in production — useful for
+			driving the dashboard locally without configuring Email
+			Routing. Once deployed, real traffic flows through{" "}
+			<code>onEmail</code> and the UI updates the same way.
+		</p>
+
+		<h2>Reference</h2>
+		<ul>
+			<li>
+				<a
+					href="https://developers.cloudflare.com/agents/api-reference/email-agents/"
+					target="_blank"
+					rel="noreferrer"
+					class="link-underline"
+				>
+					Cloudflare's Email Agents docs
+				</a>
+			</li>
+			<li>
+				<a
+					href="https://developers.cloudflare.com/email-routing/"
+					target="_blank"
+					rel="noreferrer"
+					class="link-underline"
+				>
+					Email Routing setup
+				</a>
+			</li>
+			<li>
+				<code>examples/email-bot</code> — full SupportAgent with
+				postal-mime parsing, replies, and the simulator UI.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

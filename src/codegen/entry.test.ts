@@ -2,8 +2,24 @@ import { describe, expect, test } from "bun:test";
 import type { AgentEntry, Manifest } from "../core/types.ts";
 import { generateEntry } from "./entry.ts";
 
-function mf(agents: AgentEntry[], root = "/fake"): Manifest {
-  return { root, agents };
+function mf(
+  agents: AgentEntry[],
+  root = "/fake",
+  features: Partial<Manifest["features"]> = {},
+  workflows: Manifest["workflows"] = [],
+): Manifest {
+  return {
+    root,
+    agents,
+    workflows,
+    features: {
+      browser: false,
+      email: false,
+      emailResolverFile: null,
+      voice: false,
+      ...features,
+    },
+  };
 }
 
 function agent(overrides: Partial<AgentEntry>): AgentEntry {
@@ -18,6 +34,8 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     hasApp: false,
     hasDocs: false,
     callables: [],
+    hasOnEmail: false,
+    isVoice: false,
     middlewareChain: [],
     ...overrides,
   };
@@ -313,5 +331,217 @@ describe("generateEntry", () => {
     expect(out).toContain('PROBE_OK');
     // Each catalog entry exposes hasDocs + a docsUrl when docs exist.
     expect(out).toContain('docsUrl');
+  });
+
+  // ---- Email handler emission ---------------------------------------------
+
+  test("features.email=false: no email handler in default export", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).not.toContain("routeAgentEmail");
+    expect(out).not.toContain("async email(");
+    expect(out).not.toContain("EMAIL_ROUTES");
+    // Env type still pure DO bindings.
+    expect(out).not.toContain("EMAIL: SendEmail");
+  });
+
+  test("features.email=true: imports routeAgentEmail and emits an email() handler", () => {
+    const out = generateEntry(
+      mf(
+        [agent({ hasOnEmail: true })],
+        "/fake",
+        { email: true },
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain('import { routeAgentEmail } from "agents"');
+    expect(out).toContain("async email(");
+    expect(out).toContain("ForwardableEmailMessage");
+    // The handler dispatches via routeAgentEmail with the resolver.
+    expect(out).toContain("await routeAgentEmail(message, env,");
+    // Env gains the EMAIL binding so this.env.EMAIL inside agents works.
+    expect(out).toContain("EMAIL: SendEmail");
+  });
+
+  test("email default resolver maps routePath → kebab class name, with +suffix instance", () => {
+    const out = generateEntry(
+      mf(
+        [
+          agent({
+            className: "SupportAgent",
+            routePath: "/support",
+            binding: "SUPPORT_AGENT",
+            sourceFile: "/fake/agents/support/agent.ts",
+            folderPath: "support",
+            hasOnEmail: true,
+          }),
+        ],
+        "/fake",
+        { email: true },
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain('defaultEmailResolver');
+    expect(out).toContain("EMAIL_ROUTES");
+    // Map keys are the routePath without leading slash, lowercased.
+    expect(out).toContain('"support": { agentName: "support-agent" }');
+    // Sub-addressing logic for +instance must be in the resolver.
+    expect(out).toContain('local.indexOf("+")');
+    expect(out).toContain('"default"'); // fallback instance id
+  });
+
+  test("only agents with hasOnEmail appear in EMAIL_ROUTES", () => {
+    // Two agents, only one handles email. The non-email one must not
+    // appear in the routes map (an inbound email to its local-part
+    // should resolve to null and be rejected).
+    const out = generateEntry(
+      mf(
+        [
+          agent({
+            className: "SupportAgent",
+            routePath: "/support",
+            binding: "SUPPORT_AGENT",
+            sourceFile: "/fake/agents/support/agent.ts",
+            folderPath: "support",
+            hasOnEmail: true,
+          }),
+          agent({
+            className: "ChatAgent",
+            routePath: "/chat",
+            binding: "CHAT_AGENT",
+            sourceFile: "/fake/agents/chat/agent.ts",
+            folderPath: "chat",
+            hasOnEmail: false,
+    isVoice: false,
+          }),
+        ],
+        "/fake",
+        { email: true },
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain('"support": { agentName: "support-agent" }');
+    expect(out).not.toContain('"chat": { agentName: "chat-agent" }');
+  });
+
+  test("workflows: imports + re-exports each workflow class", () => {
+    // Workflows need to land on the module boundary so wrangler's
+    // `workflows: [{ class_name }]` lookup finds them.
+    const out = generateEntry(
+      mf(
+        [agent({})],
+        "/fake",
+        {},
+        [
+          {
+            className: "OrdersProcessing",
+            binding: "ORDERS_PROCESSING",
+            name: "orders-processing",
+            sourceFile: "/fake/agents/orders/workflow.ts",
+            baseClass: "AgentWorkflow",
+          },
+        ],
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain(
+      `import OrdersProcessing from "../../agents/orders/workflow.ts";`,
+    );
+    expect(out).toContain(`export { OrdersProcessing };`);
+  });
+
+  test("no workflows: no workflow import / reexport", () => {
+    const out = generateEntry(mf([agent({})]), {
+      outPath: "/fake/.ayjnt/dist/entry.ts",
+    });
+    expect(out).not.toContain("AgentWorkflow");
+    expect(out).not.toMatch(/import \w+ from "[^"]*workflow\.ts/);
+  });
+
+  test("co-located workflow: emits prototype patch pairing agent to binding", () => {
+    // The `withWorkflow` mixin reads `__ayjntWorkflowBinding` off the
+    // agent prototype to know which workflow this.workflow(...) should
+    // trigger. The codegen pairs by folder: agent.ts + workflow.ts in
+    // the same directory → patch the prototype with the workflow's
+    // binding name.
+    const out = generateEntry(
+      mf(
+        [
+          agent({
+            agentId: "orders",
+            className: "OrdersAgent",
+            binding: "ORDERS_AGENT",
+            sourceFile: "/fake/agents/orders/agent.ts",
+          }),
+        ],
+        "/fake",
+        {},
+        [
+          {
+            className: "OrdersProcessing",
+            binding: "ORDERS_PROCESSING",
+            name: "orders-processing",
+            sourceFile: "/fake/agents/orders/workflow.ts",
+            baseClass: "AgentWorkflow",
+          },
+        ],
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).toContain(
+      `Object.defineProperty(OrdersAgent.prototype, "__ayjntWorkflowBinding", { value: "ORDERS_PROCESSING", enumerable: false });`,
+    );
+  });
+
+  test("non-co-located workflow: no prototype patch emitted", () => {
+    // A workflow whose folder doesn't match any agent's folder is
+    // treated as standalone (fire-and-forget batch under a separate
+    // tree, etc.). No prototype patch — the user falls back to the
+    // SDK's `this.runWorkflow("BINDING", params)` directly.
+    const out = generateEntry(
+      mf(
+        [
+          agent({
+            agentId: "chat",
+            className: "ChatAgent",
+            sourceFile: "/fake/agents/chat/agent.ts",
+          }),
+        ],
+        "/fake",
+        {},
+        [
+          {
+            className: "CleanupJob",
+            binding: "CLEANUP_JOB",
+            name: "cleanup-job",
+            sourceFile: "/fake/workflows/cleanup/workflow.ts",
+            baseClass: "WorkflowEntrypoint",
+          },
+        ],
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    expect(out).not.toContain("__ayjntWorkflowBinding");
+  });
+
+  test("emailResolverFile set: imports the user's custom resolver, omits default", () => {
+    const out = generateEntry(
+      mf(
+        [agent({ hasOnEmail: true })],
+        "/fake",
+        {
+          email: true,
+          emailResolverFile: "/fake/email.ts",
+        },
+      ),
+      { outPath: "/fake/.ayjnt/dist/entry.ts" },
+    );
+    // Custom resolver is imported and referenced in the email() handler.
+    expect(out).toContain('import customEmailResolver from');
+    expect(out).toContain('resolver: customEmailResolver');
+    // The manifest-derived default + EMAIL_ROUTES map are NOT emitted.
+    expect(out).not.toContain("defaultEmailResolver");
+    expect(out).not.toContain("EMAIL_ROUTES");
   });
 });

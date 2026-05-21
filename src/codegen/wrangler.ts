@@ -90,6 +90,17 @@ export function generateWrangler(
     migrations: lockfile.migrations.map(stripUndefined),
   };
 
+  // Workflows — emitted only when at least one workflow.ts was discovered.
+  // Workflows don't have DO-style migrations: they're independent
+  // Workflow-class bindings the runtime registers via `class_name`.
+  if (manifest.workflows.length > 0) {
+    config["workflows"] = manifest.workflows.map((w) => ({
+      name: w.name,
+      binding: w.binding,
+      class_name: w.className,
+    }));
+  }
+
   // The assets config points wrangler at .ayjnt/assets/ (one level up from
   // wrangler.jsonc).
   //
@@ -115,6 +126,51 @@ export function generateWrangler(
       not_found_handling: "none",
       html_handling: "none",
     };
+  }
+
+  // Browser tools opt-in. Any agent importing from `"ayjnt/browser"`
+  // flips `manifest.features.browser`; we mirror that into the three
+  // bindings Cloudflare's `createBrowserTools` requires plus the
+  // `nodejs_compat` flag. The flag is added to the existing set so
+  // any user-supplied compatibility flags are preserved.
+  if (manifest.features.browser) {
+    config["browser"] = { binding: "BROWSER" };
+    config["worker_loaders"] = [{ binding: "LOADER" }];
+    // `ai` may already be present via `extras` (e.g. a Voice agent
+    // declared it). Don't clobber a user-set value.
+    if (config["ai"] === undefined) {
+      config["ai"] = { binding: "AI" };
+    }
+    // Spread into a fresh set so we don't mutate `flags` after it's
+    // been written to the config above.
+    if (!flags.includes("nodejs_compat")) {
+      // Unreachable — `flags` always starts with `nodejs_compat` — but
+      // keep the guard for paranoia in case the default changes.
+      flags.push("nodejs_compat");
+    }
+  }
+
+  // Email opt-in. Any agent with an `onEmail(email)` method flips
+  // `manifest.features.email`; we mirror that into a `send_email`
+  // binding so `this.sendEmail(...)` and `this.replyToEmail(...)`
+  // resolve at runtime. The corresponding `email()` worker export
+  // gets emitted by the entry generator.
+  //
+  // `remote: true` lets local dev send through Cloudflare's Email
+  // Service so the round-trip works without a deployed worker.
+  // Inbound delivery still requires an Email Routing rule in the
+  // Cloudflare dashboard pointing at this worker.
+  if (manifest.features.email) {
+    config["send_email"] = [{ name: "EMAIL", remote: true }];
+  }
+
+  // Voice opt-in. Any agent using the `withVoice(...)` mixin from
+  // `@cloudflare/voice` needs the Workers AI binding for its STT /
+  // TTS providers (`WorkersAIFluxSTT`, `WorkersAITTS`, etc.). Reuses
+  // the same `ai` block the browser feature would add — if both
+  // flags are on, we only emit one AI binding.
+  if (manifest.features.voice && config["ai"] === undefined) {
+    config["ai"] = { binding: "AI" };
   }
 
   const header =

@@ -28,5 +28,14 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": ["src/**/*", "bin/**/*"],
-  "exclude": ["node_modules", "examples", ".ayjnt", "**/.ayjnt/**"]
+  "exclude": [
+    "node_modules",
+    "examples",
+    ".ayjnt",
+    "**/.ayjnt/**",
+    // Browser-only files. Live in tsconfig.client.json which adds DOM
+    // lib + @types/react. Excluding them here keeps the worker-side
+    // check honest about not using DOM globals.
+    "src/runtime/voiceClient.tsx"
+  ]
 }

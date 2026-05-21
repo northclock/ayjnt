@@ -48,6 +48,14 @@ export type AgentEntry = {
    *  Surfaced in the agent catalog so callers can discover the RPC surface
    *  without reading source. Empty array when no `@callable` methods exist. */
   callables: CallableMethod[];
+  /** Whether the agent class implements an `onEmail(email)` method. Drives
+   *  inclusion in the generated worker `email()` handler's resolver map. */
+  hasOnEmail: boolean;
+  /** True when the class is constructed via the `withVoice(...)` mixin
+   *  from `@cloudflare/voice`. The generated typed React hook for this
+   *  agent uses `useVoiceAgent` (with ayjnt URL routing) instead of the
+   *  default `useAgent`. */
+  isVoice: boolean;
   /** Middleware files that apply to this agent, ordered root → leaf. Absolute paths. */
   middlewareChain: string[];
   /** Name of the class this agent extends, as written in the source. We use
@@ -57,12 +65,63 @@ export type AgentEntry = {
   baseClass: string;
 };
 
+/** Features the project opts into by import or convention.
+ *
+ *  Each flag here triggers a corresponding wrangler.jsonc change. Computed
+ *  workspace-wide during scan rather than per-agent because the bindings
+ *  themselves are workspace-wide (one `browser` block in wrangler regardless
+ *  of how many agents call `browserTools(this)`). */
+export type FeatureFlags = {
+  /** Any agent imports from `"ayjnt/browser"`. Adds `browser`,
+   *  `worker_loaders`, and `ai` bindings + the `nodejs_compat` flag. */
+  browser: boolean;
+  /** Any agent implements `onEmail(email)`. Adds a `send_email` binding
+   *  and emits an `email(message, env)` worker export with a generated
+   *  resolver that maps the local part of the `to` address to an agent
+   *  route, with optional `+suffix` for the DO instance id. */
+  email: boolean;
+  /** Absolute path to a user-supplied `email.ts` at the workspace root.
+   *  When present, the generated entry imports the default-exported
+   *  resolver from it instead of using the manifest-derived default. */
+  emailResolverFile: string | null;
+  /** Any agent uses the `withVoice(...)` mixin from `@cloudflare/voice`.
+   *  Adds the `ai` binding (shared with the browser feature if both are
+   *  on) and switches the generated React hook for those agents to a
+   *  custom `useVoiceAgent` that connects via ayjnt's URL shape. */
+  voice: boolean;
+};
+
+/** A single Cloudflare Workflow discovered in the file tree.
+ *
+ *  Workflows live in `workflow.ts` files, either co-located with an
+ *  agent (`agents/<route>/workflow.ts`) or at the project root under
+ *  `workflows/<name>/workflow.ts`. The default-exported class must
+ *  extend `AgentWorkflow` or `WorkflowEntrypoint`. */
+export type WorkflowEntry = {
+  /** Exported class name as written in workflow.ts. Must match the
+   *  wrangler binding's `class_name`. */
+  className: string;
+  /** Binding name on `env` — UPPER_SNAKE of the class name. */
+  binding: string;
+  /** Wrangler-side workflow `name` field. Kebab of the class. */
+  name: string;
+  /** Absolute path to the workflow.ts source file. */
+  sourceFile: string;
+  /** Name of the class this workflow extends — `AgentWorkflow` or
+   *  `WorkflowEntrypoint` typically. */
+  baseClass: string;
+};
+
 /** The full scan result. One per project. */
 export type Manifest = {
   /** Project root (absolute). */
   root: string;
   /** All agents, in stable order (alphabetical by routePath). */
   agents: AgentEntry[];
+  /** All workflows, in stable order (alphabetical by className). */
+  workflows: WorkflowEntry[];
+  /** Feature opt-ins detected from agent source — see {@link FeatureFlags}. */
+  features: FeatureFlags;
 };
 
 /** Committed to git at .ayjnt/migrations.json. Source of truth for what is in prod. */

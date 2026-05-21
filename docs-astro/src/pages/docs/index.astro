@@ -123,9 +123,7 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 										{step.sub}
 									</span>
 								</div>
-								<pre class="mt-2 overflow-x-auto border border-[var(--rule-strong)] bg-[var(--paper)] px-3 py-2 font-mono text-[12.5px] leading-snug">
-									<span class="mr-2 text-[var(--amber)]">$</span><span class="break-all">{step.command}</span>
-								</pre>
+								<div class="mt-2 overflow-x-auto border border-[var(--rule-strong)] bg-[var(--paper)] px-3 py-2 font-mono text-[12.5px] leading-snug"><span class="mr-2 text-[var(--amber)]">$</span><span class="break-all">{step.command}</span></div>
 							</div>
 						</li>
 					))}

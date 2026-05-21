@@ -1,0 +1,21 @@
+// Browser-side TypeScript project. Covers src/runtime/*.tsx files that
+// import React + use DOM globals (WebSocket, window, etc.). The main
+// tsconfig.json targets the worker runtime (no DOM, no React) — if we
+// included these files in that project, every reference to `window` or
+// `WebSocket` would error.
+//
+// Run separately:
+//   bunx tsc -p tsconfig.client.json --noEmit
+//
+// Both projects must pass before publishing.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["@types/react"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "include": ["src/runtime/voiceClient.tsx"],
+  "exclude": ["node_modules", "examples", ".ayjnt", "**/.ayjnt/**"]
+}

@@ -103,6 +103,30 @@ export const DOCS_SECTIONS: DocsSection[] = [
 					"Extending McpAgent, registering tools, streamable HTTP and SSE, Claude Desktop integration.",
 			},
 			{
+				slug: "guides/workflows",
+				title: "Workflows",
+				blurb:
+					"Pair an agent with a durable Cloudflare Workflow by dropping workflow.ts — zero config, typed RPC stub, no migrations.",
+			},
+			{
+				slug: "guides/browser",
+				title: "Browser tools",
+				blurb:
+					"Zero-config browserTools(this) from ayjnt/browser — wires BROWSER, LOADER, AI, and nodejs_compat in one go.",
+			},
+			{
+				slug: "guides/email",
+				title: "Email",
+				blurb:
+					"Define onEmail(message) and ayjnt wires Email Routing, the send_email binding, and address-based dispatch.",
+			},
+			{
+				slug: "guides/voice",
+				title: "Voice agents",
+				blurb:
+					"withVoice(Agent) + Workers AI STT/TTS, plus a generated useVoiceAgent hook that respects ayjnt's URL shape.",
+			},
+			{
 				slug: "guides/env-vars",
 				title: "Environment variables & secrets",
 				blurb:

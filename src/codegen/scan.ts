@@ -10,9 +10,15 @@
 import { Glob } from "bun";
 import * as path from "node:path";
 import { existsSync } from "node:fs";
-import type { AgentEntry, CallableMethod, Manifest } from "../core/types.ts";
+import type {
+  AgentEntry,
+  CallableMethod,
+  FeatureFlags,
+  Manifest,
+  WorkflowEntry,
+} from "../core/types.ts";
 
-export type { AgentEntry, CallableMethod };
+export type { AgentEntry, CallableMethod, WorkflowEntry };
 
 /**
  * Scan the project for agents. Returns a Manifest with all discovered agents
@@ -24,11 +30,25 @@ export async function scan(root: string): Promise<Manifest> {
 
   // Bun.file().exists() returns false for directories — use fs.
   if (!existsSync(agentsDir)) {
-    return { root, agents: [] };
+    return {
+      root,
+      agents: [],
+      workflows: await scanWorkflows(root),
+      features: emptyFeatures(),
+    };
   }
 
   const glob = new Glob("**/agent.ts");
   const entries: AgentEntry[] = [];
+  const features: FeatureFlags = emptyFeatures();
+
+  // A workspace-level `email.ts` (default export = EmailResolver) lets the
+  // user override the manifest-derived default routing. Picked up here so
+  // entry codegen can emit the right import.
+  const emailFile = path.join(root, "email.ts");
+  if (existsSync(emailFile)) {
+    features.emailResolverFile = emailFile;
+  }
 
   for await (const rel of glob.scan({ cwd: agentsDir })) {
     const agentFile = path.join(agentsDir, rel);
@@ -46,6 +66,9 @@ export async function scan(root: string): Promise<Manifest> {
     const appFile = path.join(agentFolder, "app.tsx");
     const docsFile = path.join(agentFolder, "docs.md");
 
+    const hasOnEmail = detectOnEmail(source);
+    const isVoice = detectWithVoice(source);
+
     entries.push({
       agentId: parsed.agentId ?? defaultAgentId(folderPath),
       className: parsed.className,
@@ -57,14 +80,187 @@ export async function scan(root: string): Promise<Manifest> {
       hasApp: existsSync(appFile),
       hasDocs: existsSync(docsFile),
       callables: parseCallables(source),
+      hasOnEmail,
+      isVoice,
       middlewareChain: await resolveMiddlewareChain(agentFolder, root),
     });
+
+    // Feature opt-ins — detected by source-level import or method. One
+    // agent anywhere triggering a flag is enough to flip it on for the
+    // whole workspace, because the wrangler bindings are workspace-wide.
+    if (importsAyjntBrowser(source)) features.browser = true;
+    if (hasOnEmail) features.email = true;
+    if (isVoice) features.voice = true;
   }
 
   entries.sort((a, b) => a.routePath.localeCompare(b.routePath));
   assertUnique(entries);
 
-  return { root, agents: entries };
+  const workflows = await scanWorkflows(root);
+  assertUniqueWorkflows(workflows, entries);
+
+  return { root, agents: entries, workflows, features };
+}
+
+/**
+ * Scan the project for workflow.ts files anywhere under the root
+ * (excluding node_modules, .ayjnt, dist). Workflows can live next to
+ * the agent that owns them (agents/<route>/workflow.ts) or at a
+ * top-level shared location like workflows/<name>/workflow.ts —
+ * either layout is recognised.
+ *
+ * Exported for tests.
+ */
+export async function scanWorkflows(root: string): Promise<WorkflowEntry[]> {
+  const glob = new Glob("**/workflow.ts");
+  const entries: WorkflowEntry[] = [];
+
+  for await (const rel of glob.scan({
+    cwd: root,
+    onlyFiles: true,
+  })) {
+    // Skip vendor and codegen artifacts.
+    if (
+      rel.includes("node_modules/") ||
+      rel.includes(".ayjnt/") ||
+      rel.startsWith("dist/")
+    ) {
+      continue;
+    }
+    const file = path.join(root, rel);
+    const source = await Bun.file(file).text();
+    const parsed = parseWorkflowSource(source);
+    if (!parsed) continue;
+    entries.push({
+      className: parsed.className,
+      baseClass: parsed.baseClass,
+      binding: classNameToBinding(parsed.className),
+      name: classNameToKebab(parsed.className),
+      sourceFile: file,
+    });
+  }
+
+  entries.sort((a, b) => a.className.localeCompare(b.className));
+  return entries;
+}
+
+/**
+ * Extract the default-exported class name and base class from a
+ * workflow.ts source file. Returns null when the file doesn't have a
+ * default-exported class — we silently skip those, since `workflow.ts`
+ * isn't a reserved name (a project might have unrelated files with
+ * that name and we shouldn't error on them).
+ *
+ * Accepts `extends AgentWorkflow` (from `agents/workflows`) and
+ * `extends WorkflowEntrypoint` (from `cloudflare:workers` — the raw
+ * Cloudflare Workflow base class).
+ */
+export function parseWorkflowSource(source: string): {
+  className: string;
+  baseClass: string;
+} | null {
+  const m = source.match(
+    /^[ \t]*export\s+default\s+class\s+([A-Za-z_$][\w$]*)\s+extends\s+([A-Za-z_$][\w$]*)/m,
+  );
+  if (!m || !m[1] || !m[2]) return null;
+  // Only count classes whose base looks like a workflow. Same
+  // source-level approach as `extends McpAgent` detection — aliased
+  // imports are a documented limitation.
+  const baseClass = m[2];
+  if (baseClass !== "AgentWorkflow" && baseClass !== "WorkflowEntrypoint") {
+    return null;
+  }
+  return { className: m[1], baseClass };
+}
+
+function assertUniqueWorkflows(
+  workflows: WorkflowEntry[],
+  agents: AgentEntry[],
+): void {
+  // Workflow binding names share a namespace with agent DO bindings.
+  // Two `FOO` bindings would be ambiguous on `env.FOO` and conflict
+  // in wrangler.jsonc, so we reject the collision early.
+  const seen = new Map<string, string>();
+  for (const a of agents) seen.set(a.binding, `agent ${a.sourceFile}`);
+  for (const w of workflows) {
+    const prior = seen.get(w.binding);
+    if (prior) {
+      throw new Error(
+        `Duplicate binding "${w.binding}"\n  first:  ${prior}\n  second: workflow ${w.sourceFile}`,
+      );
+    }
+    seen.set(w.binding, `workflow ${w.sourceFile}`);
+  }
+}
+
+/** Default-shape `FeatureFlags`. Centralised so the empty case stays in
+ *  sync between the no-agents-dir bailout and the regular scan path. */
+function emptyFeatures(): FeatureFlags {
+  return {
+    browser: false,
+    email: false,
+    emailResolverFile: null,
+    voice: false,
+  };
+}
+
+/** True when the source uses Cloudflare's `withVoice(...)` mixin from
+ *  `@cloudflare/voice`. The detection is source-level — the user must
+ *  literally write `withVoice(SomeBase)` for it to fire. Aliased
+ *  imports (`import { withVoice as wv }`) are a documented limitation,
+ *  same as `extends McpAgent` detection. */
+export function detectWithVoice(source: string): boolean {
+  // Strip comments so JSDoc examples don't trigger the flag.
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  // Match `withVoice(` as a function call — covers both
+  // `class Foo extends withVoice(Agent) { … }` and
+  // `const V = withVoice(Agent); class Foo extends V { … }`.
+  return /\bwithVoice\s*\(/.test(stripped);
+}
+
+/** True when the source declares an `onEmail` method anywhere on the
+ *  class body. Same line-based heuristic as `parseCallables` — we look
+ *  for the method declaration shape, not a full TS parse. */
+export function detectOnEmail(source: string): boolean {
+  // Strip comments so an example or doc string mentioning `onEmail`
+  // doesn't trigger the flag.
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  // Match a method declaration named `onEmail` with the usual TS
+  // modifiers. We require the opening `(` to differentiate from a
+  // class field or variable named the same. The `async`/`override`/
+  // modifier prefixes are optional in any order — we accept any
+  // subset.
+  return /(?:^|[};{])\s*(?:public\s+|private\s+|protected\s+|override\s+|async\s+|static\s+)*onEmail\s*\(/m.test(
+    stripped,
+  );
+}
+
+/** True when the source contains an `import` statement referencing the
+ *  `"ayjnt/browser"` module specifier. Matches every import shape:
+ *
+ *    import { browserTools } from "ayjnt/browser";  // named
+ *    import x from "ayjnt/browser";                  // default
+ *    import * as x from "ayjnt/browser";             // namespace
+ *    import "ayjnt/browser";                         // side-effect
+ *
+ *  Same source-level detection approach as `extends McpAgent`. Aliased
+ *  re-exports (`import { browserTools as bt } from "…"`) still match
+ *  because we anchor on the module specifier, not the binding name. */
+export function importsAyjntBrowser(source: string): boolean {
+  // Strip block + line comments so `// import from "ayjnt/browser"`
+  // examples in JSDoc don't trigger the flag.
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  // `\bimport\b` requires an actual `import` keyword nearby; the
+  // `[^;\n]*?` keeps the match within a single statement so a string
+  // literal mentioning the path elsewhere (no preceding `import`)
+  // doesn't trigger. Non-greedy to fail fast on false matches.
+  return /\bimport\b[^;\n]*?(["'])ayjnt\/browser\1/.test(stripped);
 }
 
 /**
@@ -322,6 +518,21 @@ export function folderToRoute(folderPath: string): string {
  */
 export function classNameToBinding(className: string): string {
   return className.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+}
+
+/**
+ * Derive the kebab-case name from a PascalCase class name. Matches the
+ * Cloudflare Agents SDK's own kebab-casing, which is what
+ * `routeAgentEmail`'s resolver expects in `EmailResolverResult.agentName`.
+ *
+ *   ChatAgent        → chat-agent
+ *   AdminUsersAgent  → admin-users-agent
+ *   HTTPServerAgent  → httpserver-agent   (acronyms stay glued — same
+ *                                          documented trade-off as
+ *                                          {@link classNameToBinding})
+ */
+export function classNameToKebab(className: string): string {
+  return className.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 /** True when an agent extends McpAgent (by source-level name match). Users

@@ -24,6 +24,24 @@
       "types": "./dist/middleware.d.ts",
       "import": "./dist/middleware.js",
       "default": "./dist/middleware.js"
+    },
+    "./browser": {
+      "bun": "./src/runtime/browser.ts",
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js",
+      "default": "./dist/browser.js"
+    },
+    "./voice/client": {
+      "bun": "./src/runtime/voiceClient.tsx",
+      "types": "./dist/voiceClient.d.ts",
+      "import": "./dist/voiceClient.js",
+      "default": "./dist/voiceClient.js"
+    },
+    "./workflow": {
+      "bun": "./src/runtime/workflow.ts",
+      "types": "./dist/workflow.d.ts",
+      "import": "./dist/workflow.js",
+      "default": "./dist/workflow.js"
     }
   },
   "files": [
@@ -48,12 +66,23 @@
     "mcp"
   ],
   "dependencies": {
-    "agents": "0.13.1",
     "wrangler": "4.82.1"
   },
+  "peerDependencies": {
+    "agents": "^0.13.1"
+  },
+  "peerDependenciesMeta": {
+    "agents": {
+      "optional": false
+    }
+  },
   "devDependencies": {
+    "@cloudflare/codemode": "^0.3.7",
+    "@cloudflare/voice": "^0.2.0",
     "@cloudflare/workers-types": "4.20260413.1",
     "@types/bun": "latest",
+    "@types/react": "^19.2.15",
+    "agents": "^0.13.1",
     "bunup": "^0.16.31"
   },
   "engines": {

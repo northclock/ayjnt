@@ -6,8 +6,23 @@ import {
   generateWrangler,
 } from "./wrangler.ts";
 
-function mf(agents: AgentEntry[]): Manifest {
-  return { root: "/fake", agents };
+function mf(
+  agents: AgentEntry[],
+  features: Partial<Manifest["features"]> = {},
+  workflows: Manifest["workflows"] = [],
+): Manifest {
+  return {
+    root: "/fake",
+    agents,
+    workflows,
+    features: {
+      browser: false,
+      email: false,
+      emailResolverFile: null,
+      voice: false,
+      ...features,
+    },
+  };
 }
 
 function agent(overrides: Partial<AgentEntry>): AgentEntry {
@@ -22,6 +37,8 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     hasApp: false,
     hasDocs: false,
     callables: [],
+    hasOnEmail: false,
+    isVoice: false,
     middlewareChain: [],
     ...overrides,
   };
@@ -137,6 +154,132 @@ describe("generateWrangler", () => {
       // browser URL and breaks useAgent's URL-derived instance lookup.
       html_handling: "none",
     });
+  });
+
+  test("features.browser=false: no browser/worker_loaders/ai bindings", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, { name: "app" });
+    const cfg = parse(out);
+    expect(cfg["browser"]).toBeUndefined();
+    expect(cfg["worker_loaders"]).toBeUndefined();
+    expect(cfg["ai"]).toBeUndefined();
+  });
+
+  test("features.browser=true: emits browser + worker_loaders + ai bindings", () => {
+    const out = generateWrangler(
+      mf([agent({})], { browser: true }),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["browser"]).toEqual({ binding: "BROWSER" });
+    expect(cfg["worker_loaders"]).toEqual([{ binding: "LOADER" }]);
+    expect(cfg["ai"]).toEqual({ binding: "AI" });
+    // nodejs_compat is required for the browser tools' loader runtime.
+    expect(cfg["compatibility_flags"]).toContain("nodejs_compat");
+  });
+
+  test("features.browser=true: extras.ai overrides the default AI binding", () => {
+    // A future Voice agent may declare its own AI binding via extras
+    // (or a different binding name). Don't clobber a user-set value.
+    const out = generateWrangler(
+      mf([agent({})], { browser: true }),
+      lockfile,
+      {
+        name: "app",
+        extras: { ai: { binding: "CUSTOM_AI" } },
+      },
+    );
+    const cfg = parse(out);
+    expect(cfg["ai"]).toEqual({ binding: "CUSTOM_AI" });
+  });
+
+  test("features.email=false: no send_email binding", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, { name: "app" });
+    const cfg = parse(out);
+    expect(cfg["send_email"]).toBeUndefined();
+  });
+
+  test("features.email=true: emits a single EMAIL send_email entry with remote:true", () => {
+    // `remote: true` lets local dev use the real Email Service so the
+    // round-trip works without a deployed worker. Inbound delivery is
+    // configured in the dashboard separately.
+    const out = generateWrangler(
+      mf([agent({})], { email: true }),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["send_email"]).toEqual([{ name: "EMAIL", remote: true }]);
+  });
+
+  test("browser + email together: both bindings appear", () => {
+    const out = generateWrangler(
+      mf([agent({})], { browser: true, email: true }),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["browser"]).toEqual({ binding: "BROWSER" });
+    expect(cfg["send_email"]).toEqual([{ name: "EMAIL", remote: true }]);
+  });
+
+  test("features.voice=true adds the AI binding", () => {
+    // Voice agents need Workers AI for STT/TTS providers.
+    const out = generateWrangler(
+      mf([agent({})], { voice: true }),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["ai"]).toEqual({ binding: "AI" });
+    // Voice doesn't drag in browser/loader.
+    expect(cfg["browser"]).toBeUndefined();
+    expect(cfg["worker_loaders"]).toBeUndefined();
+  });
+
+  test("voice + browser together: single AI binding (no duplicate)", () => {
+    // Both features need `ai`. We only emit it once.
+    const out = generateWrangler(
+      mf([agent({})], { voice: true, browser: true }),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["ai"]).toEqual({ binding: "AI" });
+    expect(cfg["browser"]).toEqual({ binding: "BROWSER" });
+  });
+
+  test("workflows: each workflow becomes a wrangler workflows[] entry", () => {
+    const out = generateWrangler(
+      mf([agent({})], {}, [
+        {
+          className: "OrdersProcessing",
+          binding: "ORDERS_PROCESSING",
+          name: "orders-processing",
+          sourceFile: "/fake/agents/orders/workflow.ts",
+          baseClass: "AgentWorkflow",
+        },
+      ]),
+      lockfile,
+      { name: "app" },
+    );
+    const cfg = parse(out);
+    expect(cfg["workflows"]).toEqual([
+      {
+        name: "orders-processing",
+        binding: "ORDERS_PROCESSING",
+        class_name: "OrdersProcessing",
+      },
+    ]);
+    // Workflows don't get DO-style migrations — only the agent does.
+    // We're not asserting on the migration array shape here; just
+    // confirming the workflows array is separate.
+  });
+
+  test("no workflows: no workflows key in config", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, { name: "app" });
+    const cfg = parse(out);
+    expect(cfg["workflows"]).toBeUndefined();
   });
 });
 
