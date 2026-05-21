@@ -1,61 +1,63 @@
 # ayjnt example: conference
 
 A Zoom-lite multi-participant video call with **live Whisper
-transcription per speaker**. Everyone in the room sees the same
-running conversation log — colored by speaker — alongside the video
-tiles.
+transcription per speaker**, built as **two collaborating agents**:
+
+- `ConferenceRoom` — one DO per room. Tracks participants, relays
+  WebRTC signaling, holds the shared transcript.
+- `Transcriber` — one DO per user. Receives that user's audio frames,
+  runs a streaming Whisper session, and forwards finalized utterances
+  to the room via typed inter-agent RPC.
+
+The two-agent split is intentional: it shows ayjnt agents composing
+cleanly. A single-DO version is shorter (and the architecture diagram
+under "Limitations" sketches it) — pick whichever fits your app.
 
 ```
 agents/
-└── room/
-    ├── agent.ts          ← ConferenceRoom (DO): signaling + STT + state
-    ├── peer-mesh.ts      ← WebRTC peer-mesh manager (P2P)
-    ├── audio-capture.ts  ← AudioWorklet mic → 16kHz int16 PCM
-    └── app.tsx           ← React UI: tiles + transcript + controls
+├── room/
+│   ├── agent.ts         ← ConferenceRoom (state + signaling + transcript)
+│   ├── peer-mesh.ts     ← WebRTC peer-mesh manager (P2P)
+│   ├── audio-capture.ts ← AudioWorklet mic → 16kHz int16 PCM
+│   └── app.tsx          ← React UI: tiles + transcript + controls
+└── transcriber/
+    └── agent.ts         ← Transcriber (per-user Whisper → room RPC)
 ```
 
 ## Architecture
 
 ```
-┌─ each participant's browser ─────────────────────────────────┐
-│  getUserMedia → <video> (self)                               │
-│  getUserMedia.mic → AudioContext → AudioWorklet              │
-│      → downsample 16kHz int16 PCM                            │
-│      → ws.send(binary)                                       │
-│                                                              │
-│  ws (room agent):                                            │
-│    ↑ binary PCM frames                                       │
-│    ↕ JSON: hello, media-state, webrtc signaling              │
-│    ↓ state sync: participants list + transcript              │
-│                                                              │
-│  WebRTC P2P mesh: one RTCPeerConnection per other peer.      │
-│  Signaling relayed through the agent. Media flows direct.    │
-└──────────────────────────────────────────────────────────────┘
+┌─ each participant's browser ───────────────────────────────────────┐
+│  ws #1 → ConferenceRoom (room state, signaling, transcript)       │
+│    ↑ hello, media-state, webrtc                                   │
+│    ↓ webrtc-from, state sync (participants + transcript)          │
+│                                                                   │
+│  ws #2 → Transcriber (per-user STT)                               │
+│    ↑ bind (once), then binary 16kHz int16 PCM                     │
+│    on utterance:                                                  │
+│      Transcriber → getAgent<ConferenceRoom>(env, roomId)          │
+│                  → room.recordUtterance(participantId, text)      │
+│                                                                   │
+│  WebRTC P2P mesh: direct media between participants.              │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-**Per-speaker transcription**: each WebSocket connection has its own
-streaming `WorkersAIFluxSTT` session on the server. When the model
-finalizes an utterance for connection X, the agent looks up X's
-display name and appends an entry to the room's transcript. `setState`
-broadcasts the new transcript line to every connected UI — instant
-fan-out, no polling.
+**Stable `participantId`** minted by the client on join is the shared
+key — both agents know the user by the same id, so the room can
+attribute every utterance to a known participant. No "Unknown
+speaker" entries.
 
-**Why P2P mesh, not SFU**: simple to wire up, no Cloudflare Realtime
-setup, works great for 2–4 participants. Bandwidth scales O(n²); if
-you want bigger rooms swap the mesh for [Cloudflare
-Realtime](https://developers.cloudflare.com/realtime/) and keep the
-agent-driven STT + transcript logic.
+**Per-speaker transcription**: each Transcriber's STT session sees one
+person's audio. The room's transcript is the merge.
 
-**Why server-side STT**: every browser has different audio formats and
-noise floors. Running Whisper centrally gives one consistent
-transcript model across all participants. Each connection gets its
-own `TranscriberSession` because sessions are stateful — can't share
-one across speakers.
+**Why P2P mesh for media, not SFU**: simple, no Cloudflare Realtime
+setup, works well for 2–4 participants. Bandwidth scales O(n²); past
+~4 you want an SFU.
 
 ## What ayjnt wires up
 
-One import of `@cloudflare/voice` anywhere in the workspace flips
-the `voice` feature flag, which auto-adds:
+One import of `@cloudflare/voice` anywhere in the workspace flips the
+`voice` feature flag, which auto-adds:
 
 ```jsonc
 // .ayjnt/dist/wrangler.jsonc (generated)
@@ -63,11 +65,20 @@ the `voice` feature flag, which auto-adds:
 "ai": { "binding": "AI" }
 ```
 
-…and augments `GeneratedEnv` with `AI: Ai` so `this.env.AI`
-autocompletes inside the agent. Drop a co-located `app.tsx` next to
-`agent.ts` and the framework bundles the React UI, mounts it at
-`/conference/<room>`, and generates a typed `useAgent` hook in
-`@ayjnt/room`.
+Both agents land in `wrangler.jsonc`'s `durable_objects.bindings` and
+the migrations lockfile:
+
+```jsonc
+"durable_objects": {
+  "bindings": [
+    { "name": "CONFERENCE_ROOM", "class_name": "ConferenceRoom" },
+    { "name": "TRANSCRIBER",     "class_name": "Transcriber"     }
+  ]
+}
+```
+
+`GeneratedEnv` gets `CONFERENCE_ROOM`, `TRANSCRIBER`, `AI`, and
+`ASSETS` (the last only because the room has a co-located `app.tsx`).
 
 ## Try it
 
@@ -76,90 +87,128 @@ bun install
 bun run dev
 ```
 
-Open two browser tabs (or two devices on the same network) at:
+Open two tabs (or two devices on the same network) at:
 
 ```
-http://localhost:8787/conference/standup
-http://localhost:8787/conference/standup
+http://localhost:8787/room/standup
+http://localhost:8787/room/standup
 ```
 
-Pick a display name in each tab, grant camera + mic, and you're in.
-Talk — utterances start appearing in the transcript on both sides
-within a second or two.
+Pick a display name in each tab, grant camera + mic. Talk —
+utterances appear in the transcript on both sides within a second.
+
+## Inter-agent RPC — the key bit
+
+The Transcriber forwards utterances to the room with one line:
+
+```ts
+// agents/transcriber/agent.ts
+import { getAgent } from "ayjnt/rpc";
+import type ConferenceRoom from "../room/agent.ts";
+
+const room = await getAgent<ConferenceRoom>(this.env.CONFERENCE_ROOM, roomId);
+await room.recordUtterance(participantId, text);
+```
+
+`getAgent<T>` returns a typed DO stub. `recordUtterance` is a plain
+public method on the `ConferenceRoom` class — no decorator needed
+because we're calling it via the Durable Object RPC channel (not from
+a browser). Errors thrown in the room propagate back through the
+`await`.
+
+The `import type ConferenceRoom from "../room/agent.ts"` is type-only:
+the worker-only modules `ConferenceRoom` imports (`@cloudflare/voice`,
+`agents`) don't leak into the Transcriber bundle.
 
 ## Controls
 
 | Control | What it does |
 |---|---|
-| **mute / unmute** | Disables the mic track AND suppresses audio frames so muted speech doesn't reach Whisper. |
-| **camera off / on** | Disables the local video track; remote tiles show the speaker's initials in place of video. |
-| **share screen** | Acquires `getDisplayMedia` and swaps the video track on every peer connection (no renegotiation — `RTCRtpSender.replaceTrack`). The browser's "Stop sharing" UI restores camera automatically. |
-| **clear transcript** | Calls `@callable clearTranscript()` on the agent. Wipes the log for every participant. |
+| **mute / unmute** | Disables mic track AND suppresses outgoing audio frames so muted speech doesn't reach Whisper. |
+| **camera off / on** | Disables local video track; remote tiles show the speaker's initials. |
+| **share screen** | Acquires `getDisplayMedia` and swaps the video track on every peer connection (no renegotiation — `RTCRtpSender.replaceTrack`). |
+| **clear transcript** | Calls `@callable clearTranscript()` on the room. Wipes the log for every participant. |
 
 ## Wire protocol
 
-**Client → Server (text JSON frames):**
+### WS #1: client → ConferenceRoom (JSON only — no binary)
 
 ```ts
-{ kind: "hello",       displayName: string }
+{ kind: "hello",       participantId: string, displayName: string }
 { kind: "media-state", muted?: boolean, cameraOn?: boolean, screenSharing?: boolean }
 { kind: "webrtc",      to: string, signal: { type: "offer"|"answer", sdp } | { type: "ice", candidate } }
 ```
 
-**Client → Server (binary frames):** 16kHz mono 16-bit LE PCM audio chunks.
-
-**Server → specific client (text JSON):**
+ConferenceRoom → client:
 
 ```ts
-{ kind: "self",        id: string }              // your own connection id
-{ kind: "webrtc-from", from: string, signal }    // relayed signaling
+{ kind: "webrtc-from", from: string, signal: ... }     // relayed signaling
+// + state sync via ayjnt's useAgent layer: { participants, transcript }
 ```
 
-**Server → all clients (state sync):** `{ participants, transcript }`
-delivered through ayjnt's `useAgent` state-sync layer. Every UI
-re-renders on each update.
+### WS #2: client → Transcriber
+
+```ts
+{ kind: "bind", roomId: string, participantId: string, displayName: string }   // once on open
+```
+
+…then binary frames carrying 16kHz mono 16-bit LE PCM.
+
+### Transcriber → ConferenceRoom (DO RPC, no WebSocket)
+
+```ts
+room.recordUtterance(participantId: string, text: string): Promise<void>
+```
 
 ## File tour
 
-- **`agent.ts`** — `ConferenceRoom extends Agent`. Manages connection
-  lifecycle, runs Whisper per connection, broadcasts state. Uses the
-  Agents SDK's `Connection` API (`onConnect` / `onMessage` /
-  `onClose`) and conn-level state to track display name + flags.
+- **`agents/room/agent.ts`** — `ConferenceRoom extends Agent`.
+  Connection lifecycle + signaling relay + `recordUtterance` RPC entry
+  point. No STT — it lives entirely in the Transcriber.
 
-- **`peer-mesh.ts`** — `PeerMesh` class with one `RTCPeerConnection`
-  per other participant. Implements MDN's [perfect
-  negotiation](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Perfect_negotiation_pattern)
-  pattern for collision-safe renegotiation.
+- **`agents/transcriber/agent.ts`** — `Transcriber extends Agent`.
+  Per-connection Whisper session, fed by binary WS frames. On
+  utterance, `getAgent<ConferenceRoom>` for the typed stub, then
+  `room.recordUtterance(...)`.
 
-- **`audio-capture.ts`** — `AudioWorkletProcessor` (inlined as a
-  source string + loaded via Blob URL) batches Float32 samples into
-  4096-sample frames. Main-thread linear-resampler converts to 16kHz
-  int16, which the agent feeds straight to Whisper.
+- **`agents/room/peer-mesh.ts`** — `PeerMesh` with one
+  `RTCPeerConnection` per other participant. Implements MDN's
+  [perfect negotiation](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Perfect_negotiation_pattern)
+  pattern.
 
-- **`app.tsx`** — React UI. `useAgent()` for state sync, raw WebSocket
-  events for `self` / `webrtc-from` (those bypass the state-sync
-  layer), and refs to keep the long-lived `PeerMesh` /
-  `AudioCaptureHandle` instances stable across renders.
+- **`agents/room/audio-capture.ts`** — `AudioWorkletProcessor`
+  (inlined as a source string + loaded via Blob URL) batches Float32
+  samples into 4096-sample frames. Linear resampler converts to
+  16kHz int16, ready for the Transcriber.
 
-## Limitations
+- **`agents/room/app.tsx`** — React UI. `useAgent()` from `@ayjnt/room`
+  for state sync to the room, a raw `WebSocket` to the Transcriber
+  for the audio stream.
+
+## Limitations & "what would I change for production"
 
 - **P2P mesh caps at ~4 participants** before O(n²) bandwidth bites.
   Production: swap in [Cloudflare Realtime
-  SFU](https://developers.cloudflare.com/realtime/).
-- **No TURN server**. Two participants behind strict NATs may fail
-  to connect. Add a TURN service (Cloudflare offers one) to the
-  `iceServers` array in `peer-mesh.ts`.
+  SFU](https://developers.cloudflare.com/realtime/) and keep the
+  agent-driven transcript logic.
+- **Two-agent split costs an extra WebSocket per user.** Could fold
+  STT back into the room DO (one DO, audio frames keyed on
+  `conn.id`). The split is here to teach inter-agent RPC; a real
+  product would pick whichever fits its concurrency story.
+- **No TURN server**. Add a TURN service (Cloudflare offers one) to
+  the `iceServers` array in `peer-mesh.ts` for strict NAT users.
 - **STT is English-only by default** — change `language: "en"` in
-  `agent.ts` to use other Whisper-supported languages.
-- **No recording.** The agent holds the transcript in memory + DO
-  state (capped at 200 lines). Persist to D1 or R2 if you need a
-  durable record.
-- **Screen-share audio is dropped.** `getDisplayMedia({ audio: true })`
-  is partially supported in browsers; for simplicity this example
-  shares video only.
+  `agents/transcriber/agent.ts`.
+- **No recording.** Transcript lives in memory + DO state (capped at
+  200 lines). Persist to D1 / R2 for a durable record.
+- **Screen-share audio is dropped.** Browsers' `getDisplayMedia` audio
+  is partially supported; example shares video only.
 
 ## See also
 
-- [Cloudflare Voice docs](https://developers.cloudflare.com/agents/api-reference/voice/) — covers `WorkersAIFluxSTT` and friends.
-- [Perfect negotiation pattern](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Perfect_negotiation_pattern) — the MDN doc this mesh implements.
-- [`examples/voice-agent`](../voice-agent) — the 1:1 voice agent pattern, simpler.
+- [`examples/voice-agent`](../voice-agent) — single-user `withVoice`
+  pattern.
+- [`examples/inter-agent`](../inter-agent) — the simpler typed RPC
+  example (`getAgent<T>` between two agents).
+- [Cloudflare Voice docs](https://developers.cloudflare.com/agents/api-reference/voice/) —
+  `WorkersAIFluxSTT` and friends.

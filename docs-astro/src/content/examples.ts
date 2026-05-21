@@ -3535,6 +3535,251 @@ export default class CommanderAgent extends Agent<GeneratedEnv, State> {
 			deployStep("https://my-app.<account>.workers.dev"),
 		],
 	},
+
+	// --- conference --------------------------------------------------------
+	{
+		slug: "conference",
+		title: "Zoom-lite with per-speaker transcription",
+		description:
+			"Two collaborating agents: a ConferenceRoom DO that holds participants + transcript + relays WebRTC signaling, and a per-user Transcriber DO that runs Whisper and RPC-forwards utterances to the room. WebRTC P2P mesh for video, Workers AI for STT. Shows how ayjnt agents compose.",
+		tags: ["multi-agent", "voice", "rpc", "websocket", "ui"],
+		status: "stable",
+		exampleDir: "examples/conference",
+		preview: {
+			kind: "diagram",
+			nodes: ["browser", "ConferenceRoom", "Transcriber (× N)", "Workers AI"],
+		},
+		whatYoullLearn: [
+			"Composing multiple agent types — a shared room DO plus one transcriber DO per user, talking to each other via typed `getAgent<T>` RPC",
+			"Running `WorkersAIFluxSTT` server-side, one streaming session per WebSocket connection",
+			"WebRTC P2P mesh with the agent as a pure signaling relay (offer/answer/ICE)",
+			"Why `participantId` (minted by the client) is the right cross-agent key — not the WebSocket connection id",
+		],
+		steps: [
+			SCAFFOLD_WITH_UI,
+			{
+				title: "Two agents under agents/",
+				blurb:
+					"`agents/room/` holds the shared ConferenceRoom + the React UI; `agents/transcriber/` holds the per-user STT agent. Both land in wrangler.jsonc automatically because they're discovered by the file scan.",
+				terminal: [
+					{ kind: "command", text: "rm -rf agents/counter" },
+					{ kind: "command", text: "mkdir -p agents/room agents/transcriber" },
+				],
+				treeTitle: "my-app/agents/",
+				tree: [
+					{
+						type: "folder",
+						name: "room",
+						defaultOpen: true,
+						children: [
+							{
+								type: "file",
+								name: "agent.ts",
+								kind: "ts",
+								note: "ConferenceRoom: state + signaling",
+							},
+							{
+								type: "file",
+								name: "peer-mesh.ts",
+								kind: "ts",
+								note: "WebRTC mesh helper",
+							},
+							{
+								type: "file",
+								name: "audio-capture.ts",
+								kind: "ts",
+								note: "mic → 16kHz PCM",
+							},
+							{
+								type: "file",
+								name: "app.tsx",
+								kind: "tsx",
+								note: "React UI",
+							},
+						],
+					},
+					{
+						type: "folder",
+						name: "transcriber",
+						defaultOpen: true,
+						children: [
+							{
+								type: "file",
+								name: "agent.ts",
+								kind: "ts",
+								note: "per-user Whisper",
+							},
+						],
+					},
+				],
+			},
+			{
+				title: "agents/room/agent.ts — shared room state",
+				blurb:
+					"No STT here — the room is a participant tracker, WebRTC signaling relay, and the receiver of `recordUtterance` RPC calls from each user's Transcriber. The shared transcript broadcasts to every connected client through ayjnt's state sync.",
+				files: [
+					{
+						path: "agents/room/agent.ts",
+						lang: "ts",
+						code: `import { Agent, callable, type Connection, type WSMessage } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Participant = {
+  id: string;             // client-minted, shared with the user's Transcriber
+  displayName: string;
+  joinedAt: number;
+  muted: boolean;
+  cameraOn: boolean;
+  screenSharing: boolean;
+};
+
+type TranscriptEntry = {
+  id: string;
+  participantId: string;
+  displayName: string;
+  text: string;
+  at: number;
+};
+
+type State = { participants: Participant[]; transcript: TranscriptEntry[] };
+
+export default class ConferenceRoom extends Agent<GeneratedEnv, State> {
+  override initialState: State = { participants: [], transcript: [] };
+
+  override async onMessage(conn: Connection, message: WSMessage) {
+    // Audio doesn't flow through this agent at all — it lives in the
+    // Transcriber. Drop any stray binary frames as a safety net.
+    if (typeof message !== "string") return;
+    const frame = JSON.parse(message);
+    // ... handle hello / media-state / webrtc relay ...
+  }
+
+  /** Inter-agent RPC entry point — called by Transcriber DOs.
+   *  Returns void; errors propagate through the await on the other side. */
+  async recordUtterance(participantId: string, text: string): Promise<void> {
+    const participant = this.state.participants.find((p) => p.id === participantId);
+    if (!participant) return; // unknown speaker — drop
+    this.setState({
+      ...this.state,
+      transcript: [
+        ...this.state.transcript,
+        { id: crypto.randomUUID(), participantId, displayName: participant.displayName, text, at: Date.now() },
+      ].slice(-200),
+    });
+  }
+
+  @callable({ description: "Clear the conversation transcript." })
+  async clearTranscript() {
+    this.setState({ ...this.state, transcript: [] });
+  }
+}`,
+						highlightLines: [27, 33, 34, 35],
+					},
+				],
+			},
+			{
+				title: "agents/transcriber/agent.ts — per-user Whisper",
+				blurb:
+					"One DO instance per participant. Each WebSocket connection gets its own streaming Whisper session. On every finalized utterance, the transcriber calls back into the room via `getAgent<ConferenceRoom>(env.CONFERENCE_ROOM, roomId)` — typed DO RPC. No magic strings: the type comes from a single type-only import.",
+				files: [
+					{
+						path: "agents/transcriber/agent.ts",
+						lang: "ts",
+						code: `import { Agent, type Connection, type WSMessage } from "agents";
+import { getAgent } from "ayjnt/rpc";
+import { WorkersAIFluxSTT, type TranscriberSession } from "@cloudflare/voice";
+import type { GeneratedEnv } from "@ayjnt/env";
+import type ConferenceRoom from "../room/agent.ts";
+
+type ConnState = {
+  roomId: string | null;
+  participantId: string | null;
+  displayName: string | null;
+};
+
+export default class Transcriber extends Agent<GeneratedEnv> {
+  private sessions = new Map<string, TranscriberSession>();
+
+  override async onConnect(conn: Connection) {
+    conn.setState({ roomId: null, participantId: null, displayName: null });
+  }
+
+  override async onMessage(conn: Connection, message: WSMessage) {
+    if (message instanceof ArrayBuffer) {
+      this.sessions.get(conn.id)?.feed(message);
+      return;
+    }
+    if (typeof message !== "string") return;
+    const { kind, roomId, participantId, displayName } = JSON.parse(message);
+    if (kind !== "bind") return;
+
+    conn.setState({ roomId, participantId, displayName });
+
+    // One Whisper session per WebSocket connection. onUtterance fires
+    // once the model finalizes a turn → RPC to the room.
+    const session = new WorkersAIFluxSTT(this.env.AI).createSession({
+      language: "en",
+      onUtterance: async (text: string) => {
+        const room = await getAgent<ConferenceRoom>(
+          this.env.CONFERENCE_ROOM,
+          roomId,
+        );
+        await room.recordUtterance(participantId, text);
+      },
+    });
+    this.sessions.set(conn.id, session);
+  }
+
+  override async onClose(conn: Connection) {
+    this.sessions.get(conn.id)?.close();
+    this.sessions.delete(conn.id);
+  }
+}`,
+						highlightLines: [2, 5, 31, 35, 36, 37, 38, 39],
+					},
+				],
+			},
+			{
+				title: "On the client — two WebSockets, one mic",
+				blurb:
+					"useAgent() handles WS #1 to the room (state sync + signaling). A raw WebSocket handles WS #2 to the user's Transcriber (audio frames). The same client-minted participantId is what ties them together — that's why the room can attribute every utterance to a known participant.",
+				files: [
+					{
+						path: "agents/room/app.tsx",
+						lang: "tsx",
+						code: `import { useAgent } from "@ayjnt/room";
+import { startAudioCapture } from "./audio-capture.ts";
+
+export default function ConferenceUI() {
+  const agent = useAgent();                         // WS #1 → room
+  const participantId = useMemo(() => crypto.randomUUID(), []);
+
+  const onJoin = async (name: string) => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+
+    // Tell the room who we are — it'll see this participantId everywhere.
+    agent.send(JSON.stringify({ kind: "hello", participantId, displayName: name }));
+
+    // Open WS #2 → this user's own Transcriber DO.
+    const ws = new WebSocket(\`wss://\${location.host}/transcriber/\${participantId}\`);
+    ws.addEventListener("open", () => {
+      ws.send(JSON.stringify({ kind: "bind", roomId: agent.name, participantId, displayName: name }));
+    });
+
+    // Mic frames → Transcriber (NOT room). The Transcriber feeds them
+    // to Whisper, then RPCs the room with the finalized utterance.
+    const micTrack = stream.getAudioTracks()[0];
+    await startAudioCapture(micTrack, (pcm) => ws.send(pcm));
+  };
+  // ... peer-mesh setup, video tiles, transcript pane ...
+}`,
+						highlightLines: [6, 11, 14, 17, 21, 22],
+					},
+				],
+			},
+			deployStep("https://my-app.<account>.workers.dev"),
+		],
+	},
 ];
 
 export function getExample(slug: string): ExampleMeta | undefined {
