@@ -1,22 +1,28 @@
 ---
 name: ayjnt-rpc
-description: Call agent methods — from another agent (typed DO RPC via `getAgent<T>`), from a browser UI (Cloudflare's `@callable()` decorator + `agent.stub.method()`), or advertise them in the catalog (ayjnt's `/** @callable */` JSDoc tag). Use when the user says "call <agentB> from <agentA>", "inter-agent RPC", "call from the UI", "call from the browser", "agent.stub.method", "agent.call", "@callable decorator", or "advertise this method in the catalog". Three patterns share the word "callable" but mean different things — pick the right one based on who's invoking the method (another agent, a browser, or a tooling consumer reading the catalog).
+description: Call agent methods — from another agent (typed DO RPC via `getAgent<T>`) or from a browser UI / catalog consumers (Cloudflare's `@callable()` decorator + `agent.stub.method()`). Use when the user says "call <agentB> from <agentA>", "inter-agent RPC", "call from the UI", "call from the browser", "agent.stub.method", "agent.call", "@callable decorator", or "advertise this method in the catalog". The framework treats the `@callable()` decorator as the single source of truth for both browser-callability and catalog inclusion. A legacy `/** @callable */` JSDoc tag exists as a fallback for the rare catalog-only case.
 ---
 
-# Three patterns called "callable" — pick the right one
+# Three patterns, two markers
 
-The word "callable" gets used three different ways in this stack.
-Sorting them out first saves a lot of confusion:
+The word "callable" shows up in three different contexts. They map
+cleanly to a small set of markers:
 
-| Pattern | Caller | Mechanism | Source |
+| Pattern | Caller | Mechanism | Marker on the method |
 |---|---|---|---|
-| **`getAgent<T>`** | Another agent (worker-side) | Native Cloudflare DO RPC | `from "ayjnt/rpc"` |
-| **`@callable()` decorator** | Browser UI (`agent.stub.method()`) | WebSocket RPC | `from "agents"` (Cloudflare) |
-| **`/** @callable */` JSDoc** | Catalog consumers (`/__ayjnt/catalog`) | Build-time metadata | None — parsed by ayjnt |
+| **`getAgent<T>`** | Another agent (worker-side) | Native Cloudflare DO RPC | None — TypeScript `public` is enough |
+| **`@callable()` decorator** | Browser UI (`agent.stub.method()`) AND `/__ayjnt/catalog` | WebSocket RPC + build-time catalog | `@callable({ description })` from `"agents"` |
+| **`/** @callable */` JSDoc** (legacy) | `/__ayjnt/catalog` only — NOT the browser | Build-time catalog only | `/** @callable */` JSDoc tag |
 
-They're orthogonal. A method can use any combination of them at once.
-See [`examples/callable-client`](../../../examples/callable-client) for
-all three on the same method.
+The decorator is the **one marker** users should reach for: it makes a
+method browser-callable AND lists it in the catalog with the same
+`description` the SDK's `getCallableMethods()` returns. The JSDoc tag
+is a fallback for the rare "advertised in the catalog but not exposed
+over WebSocket" case (e.g., agent-to-agent RPC methods you want
+discoverable).
+
+See [`examples/callable-client`](../../../examples/callable-client)
+for a worked example.
 
 ## Pattern 1 — agent-to-agent: `getAgent<T>`
 
@@ -185,59 +191,101 @@ async generate(stream: StreamingResponse, prompt: string) {
 }
 ```
 
-## Pattern 3 — discovery: ayjnt's `/** @callable */` JSDoc
+## Pattern 3 — discovery: `/__ayjnt/catalog`
 
-A build-time **metadata tag**. Tagged methods show up in
-`/__ayjnt/catalog` with name, params, return type, and description.
-Has no runtime effect on its own — it doesn't make the method
-callable from anywhere.
-
-```ts
-/**
- * Add a new note to the list.
- * @callable                                     ← ayjnt JSDoc tag
- */
-@callable({ description: "Add a new note." })   // ← CF decorator
-async addNote(text: string): Promise<Note> { /* … */ }
-```
-
-Use the JSDoc tag when:
-
-- The method is part of the agent's public surface and you want
-  other developers (or tooling) to discover it via the catalog.
-- You're documenting the RPC contract for consumers outside the
-  worker.
-
-Catalog filtering still goes through each agent's middleware chain —
-admin agents stay hidden from anonymous callers.
+Catalog inclusion is **driven by the `@callable()` decorator from
+Pattern 2** — the same marker. ayjnt's build-time scanner sees the
+decorator on the method and lists it in the catalog automatically:
 
 ```sh
 curl http://localhost:8787/__ayjnt/catalog \
   | jq '.agents[] | select(.routePath == "/notes") | .callables'
 ```
 
-### Tag rules
+```json
+[
+  {
+    "name": "addNote",
+    "params": "text: string",
+    "returnType": "Promise<Note>",
+    "description": "Add a new note to the list."
+  },
+  …
+]
+```
 
-- Parsed source-level (regex). Three constraints:
-  - JSDoc must **immediately precede** the method.
-  - Parameter list must fit on **one line**.
-  - Return type annotation must not contain a top-level `{`
-    (object literal types as return types aren't supported).
-- The first prose line of the JSDoc becomes the catalog description.
+Description precedence:
+
+1. `@callable({ description: "…" })` — the decorator option (wins).
+2. First prose line of the JSDoc above the method (fallback when the
+   decorator has no `description`).
+3. `null`.
+
+So this pattern is enough:
+
+```ts
+/** Decrement stock for a SKU. Throws on insufficient stock. */
+@callable()
+async decrement(sku: string, qty: number): Promise<number> { /* … */ }
+```
+
+The JSDoc above provides editor hover + the catalog fallback
+description. The decorator does the runtime + catalog work. No
+`@callable` JSDoc tag needed.
+
+Catalog filtering still goes through each agent's middleware chain —
+admin agents stay hidden from anonymous callers.
+
+### Legacy JSDoc tag (catalog-only fallback)
+
+For the rare case where you want catalog visibility *without*
+browser exposure — typically a method other agents call via
+`getAgent<T>` that you still want advertised — use the legacy JSDoc
+tag instead of the decorator:
+
+```ts
+/**
+ * Re-seed the notes from a snapshot. Agent-to-agent RPC only —
+ * listed in the catalog but not browser-callable.
+ * @callable
+ */
+async reseed(snapshot: Note[]): Promise<void> { /* … */ }
+```
+
+The JSDoc-tag path has no runtime effect; it's pure metadata for the
+catalog. Most code shouldn't need it — if a method is part of your
+public surface, decorate it.
+
+### Tag/decorator constraints
+
+Both markers are parsed source-level (regex), so:
+
+- Parameter list must fit on **one line**.
+- Return type annotation must not contain a top-level `{`
+  (object literal return types aren't supported).
+- Decorator detection doesn't follow import aliases. Write
+  `@callable(...)` literally (not `@cb(...)` after renaming the
+  import). Same limitation as `extends McpAgent`.
+- `@callable({ validate: (x) => x })` — decorator args with nested
+  parens confuse the non-greedy capture. Stick to simple object
+  literals in the decorator args, or use the JSDoc-tag fallback.
 
 ## Combining them
 
-The mix-and-match matrix:
+The matrix collapses to three rows under the unified design:
 
-| `getAgent<T>` (caller-side) | `@callable()` decorator | `/** @callable */` JSDoc | Behaviour |
-|---|---|---|---|
-| ✓ | ✗ | ✗ | Reachable from other agents only. |
-| ✓ | ✓ | ✗ | Reachable from agents AND browser UI. Catalog-hidden. |
-| ✓ | ✓ | ✓ | **Recommended for public methods.** All three audiences. |
-| ✓ | ✗ | ✓ | Reachable from agents, advertised in catalog. Not from browser. |
+| `@callable()` decorator | `/** @callable */` JSDoc | Browser-callable? | In catalog? | Use for |
+|---|---|---|---|---|
+| ✗ | ✗ | ✗ | ✗ | Internal helpers. Other agents can still call via `getAgent<T>` — visibility is just TypeScript's `public`. |
+| ✓ | ✗ | ✓ | ✓ | **Default.** Public RPC surface for both browsers and catalog consumers. |
+| ✗ | ✓ | ✗ | ✓ | Catalog-only: advertised but not exposed over WebSocket. Useful for agent-to-agent RPC methods you want discoverable. |
 
-`getAgent<T>` always works against any public method — no decoration
-required, because DO RPC doesn't go through the WebSocket / catalog
+(The decorator-plus-JSDoc-tag combination still works but is
+redundant — the decorator alone covers both audiences. If the user
+has both, treat the JSDoc tag as a no-op cleanup target.)
+
+`getAgent<T>` always works against any public method regardless of
+decoration — DO RPC doesn't go through the WebSocket or catalog
 layers.
 
 ## Common pitfalls

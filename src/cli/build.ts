@@ -7,6 +7,10 @@
 //   3. diffMigrations                                → MigrationDiff
 //   4. applyDiff                                     → finalLockfile
 //   5. writeLockfile (optional — deploy skips this)
+//   5b.syncDevVars(root, dist)                       → relative symlinks
+//        in .ayjnt/dist/ pointing at the project-root .dev.vars{,.<env>}.
+//        Required because wrangler resolves .dev.vars against the
+//        wrangler.jsonc directory (configDir), not its cwd.
 //   6. generateTsconfig  → .ayjnt/tsconfig.json
 //   7. generateEnvTypes  → .ayjnt/env.d.ts
 //   8. generateClientHook per agent → .ayjnt/client/<route>/index.tsx
@@ -17,7 +21,15 @@
 //  11. generateEntry (with assetRoutes map) → .ayjnt/dist/entry.ts
 //  12. generateWrangler (with hasApps flag) → .ayjnt/dist/wrangler.jsonc
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import * as path from "node:path";
 import {
   bundleApp,
@@ -98,6 +110,12 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   for (const dir of [dotDir, outDir, clientDir]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   }
+
+  // Wrangler resolves `.dev.vars` relative to the directory containing
+  // wrangler.jsonc (configDir), not its cwd. Our generated config lives
+  // in .ayjnt/dist/, so without this sync wrangler never sees the user's
+  // project-root .dev.vars. Mirror every .dev.vars{,.<env>} into outDir.
+  syncDevVars(cwd, outDir, log);
 
   // 6: path-alias tsconfig (always the same content, but regenerated so
   //    users can't drift by editing it).
@@ -261,4 +279,119 @@ async function resolveWorkerName(cwd: string): Promise<string> {
 export async function build(argv: string[]): Promise<void> {
   const { cwd } = parseArgs(argv);
   await runBuild({ cwd });
+}
+
+/**
+ * Mirror every `.dev.vars` file from the project root into
+ * `.ayjnt/dist/` so wrangler picks them up. Wrangler resolves
+ * `.dev.vars` from the directory containing wrangler.jsonc (configDir),
+ * not from its working directory — and our generated config lives in
+ * `.ayjnt/dist/`. Without this sync the user's project-root
+ * `.dev.vars` is invisible to wrangler, which is the original bug.
+ *
+ * Sync covers `.dev.vars` and any `.dev.vars.<env>` siblings
+ * (for `wrangler dev --env <env>`). Files ending in `.example` are
+ * skipped — those are checked-in samples, not real secrets.
+ *
+ * Strategy: relative symlink first (so wrangler sees live edits to the
+ * source file with no rebuild), copy fallback for filesystems that
+ * refuse symlinks (Windows without developer mode → EPERM). Stale
+ * entries in dist from previous syncs are cleaned up — if the user
+ * deletes `.dev.vars` from the project root, the mirror in dist goes
+ * with it on the next build.
+ *
+ * Exported for testing.
+ */
+export function syncDevVars(
+  projectRoot: string,
+  distDir: string,
+  log: (msg: string) => void = () => {},
+): void {
+  // Discover source files at project root: .dev.vars and .dev.vars.<env>,
+  // excluding the conventional .example samples.
+  const sources = existsSync(projectRoot)
+    ? readdirSync(projectRoot).filter(
+        (f) =>
+          (f === ".dev.vars" || f.startsWith(".dev.vars.")) &&
+          !f.endsWith(".example"),
+      )
+    : [];
+  const sourceSet = new Set(sources);
+
+  // Cleanup pass: remove any stale `.dev.vars*` previously synced into
+  // dist that no longer have a project-root source. Without this, a
+  // user who deletes `.dev.vars` would be surprised by wrangler still
+  // loading the old values from a leftover mirror.
+  if (existsSync(distDir)) {
+    for (const entry of readdirSync(distDir)) {
+      if (
+        (entry === ".dev.vars" || entry.startsWith(".dev.vars.")) &&
+        !sourceSet.has(entry)
+      ) {
+        try {
+          rmSync(path.join(distDir, entry), { force: true });
+        } catch {
+          // Best-effort; non-fatal.
+        }
+      }
+    }
+  }
+
+  for (const file of sources) {
+    const src = path.join(projectRoot, file);
+    const dest = path.join(distDir, file);
+
+    // Wipe any prior mirror — symlink or copy — so we never accumulate
+    // stale state. `force: true` makes rmSync silent on missing files
+    // and on broken symlinks (which lstat would flag, but rm handles).
+    try {
+      rmSync(dest, { force: true });
+    } catch {
+      // Fall through; the symlink/copy below will surface real errors.
+    }
+
+    try {
+      // Relative symlink keeps the dist dir movable with the project —
+      // an absolute symlink would break if the user renames a parent
+      // directory. The `"file"` arg is required on Windows but
+      // harmless elsewhere.
+      const rel = path.relative(distDir, src);
+      symlinkSync(rel, dest, "file");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      // EPERM is the Windows-without-developer-mode signature. Other
+      // codes (EEXIST after a race, ENOSYS on exotic FSes) take the
+      // same fallback — a snapshot copy. Mid-session edits to the
+      // source won't auto-reload through a copy; we warn so the user
+      // knows to re-run build after secret changes.
+      try {
+        copyFileSync(src, dest);
+        log(
+          `⚠ ayjnt: copied ${file} into .ayjnt/dist/ (symlink failed${
+            code ? `: ${code}` : ""
+          }). Edits to ${file} won't auto-reload — re-run ayjnt build after changes.`,
+        );
+      } catch (copyErr) {
+        log(
+          `⚠ ayjnt: failed to sync ${file} into .ayjnt/dist/ — wrangler will not see it. ` +
+            `(${(copyErr as Error).message})`,
+        );
+      }
+    }
+  }
+}
+
+/** Helper for tests: tells whether a path in dist is currently a
+ *  symlink to the project-root file, or a copy of it. */
+export function devVarsSyncKind(
+  distDir: string,
+  filename: string,
+): "symlink" | "copy" | "missing" {
+  const p = path.join(distDir, filename);
+  if (!existsSync(p)) return "missing";
+  try {
+    return lstatSync(p).isSymbolicLink() ? "symlink" : "copy";
+  } catch {
+    return "missing";
+  }
 }

@@ -21,7 +21,17 @@ const {
 // Shiki runs at build time under static output — no client bundle cost.
 const html = await highlight(code.trim(), lang, highlightLines ?? []);
 ---
-<div class={`card overflow-hidden ${className}`}>
+<!--
+  min-w-0 is the critical bit. Grid and flex items default to
+  `min-width: auto`, which means they refuse to shrink below their
+  intrinsic content width. The Shiki <pre> inside (which already has
+  overflow-x: auto) carries the longest line of code as its intrinsic
+  width, so without min-w-0 the wrapping card pushes its grid/flex
+  parent — and ultimately the document body — wider than the viewport
+  on narrow screens. With min-w-0 the card shrinks to its track and
+  the <pre>'s horizontal scrollbar takes over.
+-->
+<div class={`card min-w-0 overflow-hidden ${className}`}>
 	{filename && (
 		<div class="flex items-center justify-between border-b border-[var(--ink)] bg-[var(--paper-edge)] px-3 py-1.5 font-mono text-xs">
 			<span class="text-[var(--ink)]">{filename}</span>

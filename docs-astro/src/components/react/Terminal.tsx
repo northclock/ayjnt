@@ -85,7 +85,11 @@ export function Terminal({
 			whileInView={{ opacity: 1, y: 0 }}
 			viewport={{ once: true, margin: "-80px" }}
 			transition={{ duration: 0.4 }}
-			className={`card font-mono text-[13px] leading-relaxed ${className}`}
+			// min-w-0 lets the terminal shrink to its grid/flex track
+			// instead of expanding to fit its longest command line. The
+			// Line components below already use `whitespace-pre-wrap
+			// break-words` so they wrap once the parent is constrained.
+			className={`card min-w-0 font-mono text-[13px] leading-relaxed ${className}`}
 		>
 			<div className="flex items-center gap-2 border-b border-[var(--ink)] bg-[var(--paper-edge)] px-3 py-2">
 				<span className="flex gap-1.5">

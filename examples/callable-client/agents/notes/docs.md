@@ -1,14 +1,11 @@
 # NotesAgent
 
-A small notes-list agent that demonstrates **`@callable` methods**
-callable directly from the browser over WebSocket.
+A small notes-list agent that demonstrates **`@callable()` methods**
+callable directly from the browser over WebSocket — and shows that
+ayjnt's `/__ayjnt/catalog` endpoint picks up the same decorator
+metadata automatically.
 
-## The two `@callable` patterns
-
-This example deliberately uses BOTH conventions on the same methods so
-you can see they're complementary, not competing.
-
-### 1. Cloudflare's `@callable()` decorator — `"agents"`
+## The decorator
 
 ```ts
 import { Agent, callable } from "agents";
@@ -23,9 +20,9 @@ A real TypeScript 5 decorator. At runtime, the Agents SDK registers
 `addNote` in its callable registry. From the browser:
 
 ```tsx
-const agent = useAgent<NotesAgent>();
+const agent = useAgent();
 const note = await agent.stub.addNote("hello"); // typed end-to-end
-// or, untyped:
+// or, untyped fallback:
 await agent.call("addNote", ["hello"]);
 ```
 
@@ -34,19 +31,11 @@ decorated method, JSON-serialises the return value, and resolves the
 Promise. `setState({...})` inside the method broadcasts the new state
 to every connected client.
 
-### 2. ayjnt's `/** @callable */` JSDoc tag
+## Same decorator drives the catalog
 
-```ts
-/**
- * Add a new note to the list.
- * @callable
- */
-@callable({ description: "Add a new note." })
-async addNote(text: string): Promise<Note> { /* … */ }
-```
-
-A build-time tag, parsed by ayjnt's `scan.ts`. Tagged methods are
-surfaced in the `/__ayjnt/catalog` JSON endpoint:
+Every `@callable()`-decorated method also shows up in
+`/__ayjnt/catalog` automatically — ayjnt's build-time scanner sees
+the decorator, no separate marker needed:
 
 ```sh
 curl http://localhost:8787/__ayjnt/catalog | jq '.agents[] | select(.routePath == "/notes")'
@@ -58,26 +47,48 @@ curl http://localhost:8787/__ayjnt/catalog | jq '.agents[] | select(.routePath =
   "className": "NotesAgent",
   "routePath": "/notes",
   "callables": [
-    { "name": "addNote",    "params": "text: string",       "returnType": "Promise<Note>",     "description": "Add a note to the list. Returns the newly created note." },
-    { "name": "deleteNote", "params": "id: string",         "returnType": "Promise<boolean>",  "description": "Delete a note by id. Returns true if the note existed." },
-    { "name": "clearNotes", "params": "",                   "returnType": "Promise<void>",     "description": "Clear every note in this instance." },
-    { "name": "countNotes", "params": "",                   "returnType": "Promise<number>",   "description": "Count the notes." }
+    { "name": "addNote",    "params": "text: string",   "returnType": "Promise<Note>",    "description": "Add a new note to the list." },
+    { "name": "deleteNote", "params": "id: string",     "returnType": "Promise<boolean>", "description": "Delete a note by id." },
+    { "name": "clearNotes", "params": "",               "returnType": "Promise<void>",    "description": "Wipe every note." },
+    { "name": "countNotes", "params": "",               "returnType": "Promise<number>",  "description": "Return the number of notes." }
   ]
 }
 ```
 
-The JSDoc tag has **no runtime effect** on its own — it's pure
-metadata for discovery. Catalog filtering still goes through the
-agent's middleware chain (see `examples/catalog`).
+The catalog description comes from `@callable({ description: "..." })`.
+If the decorator has no `description` option, ayjnt falls back to the
+first prose line of the JSDoc immediately above the method. Long-form
+JSDoc stays available for developer-facing hover docs — only the
+short, machine-readable line ends up in the catalog.
+
+## The legacy JSDoc tag
+
+For the rare case where you want catalog visibility *without* WebSocket
+exposure — e.g., an internal-but-stable RPC method other agents call
+via `getAgent<T>` that you still want advertised — the framework
+recognises `/** @callable */` as a JSDoc tag:
+
+```ts
+/**
+ * Re-seed the notes from a snapshot. Internal — not browser-callable,
+ * but listed in the catalog as a discoverable agent-to-agent RPC.
+ * @callable
+ */
+async reseed(snapshot: Note[]): Promise<void> { /* … */ }
+```
+
+No decorator, no browser exposure — but `/__ayjnt/catalog` still
+lists it. This is a fallback for the unusual case. **Most methods
+should just use the decorator.**
 
 ## Mix-and-match matrix
 
 | `@callable()` decorator | `/** @callable */` JSDoc | Behaviour |
 |---|---|---|
-| ✗ | ✗ | Private. Other agents can still call via `getAgent<T>` (native DO RPC). |
-| ✓ | ✗ | Browser-callable via `agent.stub.method()`. Hidden from `/__ayjnt/catalog`. |
-| ✗ | ✓ | Listed in `/__ayjnt/catalog`. Not callable from the browser. |
-| ✓ | ✓ | **Recommended.** Browser-callable AND discoverable. |
+| ✗ | ✗ | Private. Other agents can still call via `getAgent<T>` (native DO RPC). Not in the catalog. |
+| ✓ | ✗ | **Recommended.** Browser-callable AND listed in the catalog. |
+| ✗ | ✓ | Catalog-only — listed but not browser-callable. Use for agent-to-agent RPC you want discoverable. |
+| ✓ | ✓ | Redundant. Identical to decorator alone; decorator's description wins. |
 
 ## Calling from another agent (no decorator needed)
 
@@ -86,17 +97,17 @@ calls methods directly over native Workers RPC — no WebSocket, no
 JSON serialisation, no client-side library. Method visibility is just
 TypeScript's `public`. See `examples/inter-agent`.
 
-That means `_findById` in `agent.ts` (no decorator, no JSDoc) is
-unreachable from the browser AND invisible in the catalog, but
-**still callable** from another agent if you import the type and have
-the binding:
+That means `_findById` in `agent.ts` (no decorator) is unreachable
+from the browser AND invisible in the catalog, but **still callable**
+from another agent if you import the type and have the binding:
 
 ```ts
 const notes = await getAgent<NotesAgent>(env.NOTES_AGENT, "main");
 const note = await notes._findById("uuid-here"); // works
 ```
 
-`@callable()` controls browser visibility, not method privacy.
+`@callable()` controls browser visibility and catalog inclusion, not
+method privacy. Agent-to-agent RPC works on any public method.
 
 ## Endpoints
 

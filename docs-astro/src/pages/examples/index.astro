@@ -40,7 +40,7 @@ const planned = EXAMPLES.filter((e) => e.status === "comingSoon");
 						{stable.length} examples ready to fork, run, and deploy.
 					</p>
 				</header>
-				<div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
 					{stable.map((e) => (
 						<ExampleCard client:visible example={e} />
 					))}
@@ -61,7 +61,7 @@ const planned = EXAMPLES.filter((e) => e.status === "comingSoon");
 						Design + spec in place; implementations land as they're ready.
 					</p>
 				</header>
-				<div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
 					{planned.map((e) => (
 						<ExampleCard client:visible example={e} />
 					))}

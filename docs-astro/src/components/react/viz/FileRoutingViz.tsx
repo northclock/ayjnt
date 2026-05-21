@@ -42,7 +42,7 @@ export function FileRoutingViz() {
 function Row({ row, index }: { row: Row; index: number }) {
 	const delay = index * 0.6;
 	return (
-		<div className="grid items-center gap-3 sm:grid-cols-[1fr_48px_1fr]">
+		<div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)]">
 			<motion.div
 				initial={{ opacity: 0, x: -8 }}
 				animate={{ opacity: 1, x: 0 }}

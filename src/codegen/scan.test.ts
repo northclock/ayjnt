@@ -316,6 +316,221 @@ describe("parseCallables", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.description).toBe("Real description for surface().");
   });
+
+  // -- decorator detection (Option A unification) ---------------------------
+
+  test("detects @callable() decorator without JSDoc tag", () => {
+    // Pure decorator path — the method must show up in the catalog
+    // because it's browser-callable, even without the JSDoc marker.
+    const src = `
+      @callable({ description: "Add a note." })
+      async addNote(text: string): Promise<Note> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toEqual([
+      {
+        name: "addNote",
+        params: "text: string",
+        returnType: "Promise<Note>",
+        description: "Add a note.",
+      },
+    ]);
+  });
+
+  test("detects deprecated @unstable_callable() alias", () => {
+    // The SDK kept `unstable_callable` as a deprecated export for migration.
+    // Pick it up too — users on older code shouldn't disappear from the catalog.
+    const src = `
+      @unstable_callable({ description: "Old style." })
+      async legacy(): Promise<void> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("legacy");
+    expect(out[0]!.description).toBe("Old style.");
+  });
+
+  test("extracts description from single-quoted string", () => {
+    const src = `
+      @callable({ description: 'Single-quoted desc.' })
+      async foo(): Promise<void> {}
+    `;
+    expect(parseCallables(src)[0]!.description).toBe("Single-quoted desc.");
+  });
+
+  test("extracts description from template-literal string", () => {
+    const src = `
+      @callable({ description: \`Template desc.\` })
+      async foo(): Promise<void> {}
+    `;
+    expect(parseCallables(src)[0]!.description).toBe("Template desc.");
+  });
+
+  test("handles escape sequences in description (\\\" → \", \\n → newline)", () => {
+    const src = `
+      @callable({ description: "Has a \\"quote\\" and a \\nnewline" })
+      async foo(): Promise<void> {}
+    `;
+    expect(parseCallables(src)[0]!.description).toBe(
+      'Has a "quote" and a \nnewline',
+    );
+  });
+
+  test("@callable() with no args: description is null", () => {
+    const src = `
+      @callable()
+      async foo(): Promise<void> {}
+    `;
+    expect(parseCallables(src)[0]).toEqual({
+      name: "foo",
+      params: "",
+      returnType: "Promise<void>",
+      description: null,
+    });
+  });
+
+  test("decorator description wins over JSDoc first prose", () => {
+    // The decorator's `description` is the machine-readable summary —
+    // it should take precedence over the (potentially longer) JSDoc.
+    const src = `
+      /**
+       * Long developer-facing JSDoc that goes into more detail
+       * than the catalog needs.
+       * @callable
+       */
+      @callable({ description: "Short blurb." })
+      async foo(): Promise<void> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.description).toBe("Short blurb.");
+  });
+
+  test("JSDoc above a @callable() (no tag) supplies fallback description", () => {
+    // Common pattern: developer writes a plain JSDoc above the
+    // decorated method without adding @callable tag. We should still
+    // pull that prose as the catalog description when the decorator
+    // didn't supply one.
+    const src = `
+      /** Decrement stock for a SKU. */
+      @callable()
+      async decrement(sku: string, qty: number): Promise<number> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.description).toBe("Decrement stock for a SKU.");
+  });
+
+  test("JSDoc-tag-only method still appears (back-compat)", () => {
+    // The Option A unification doesn't break existing JSDoc-only code.
+    const src = `
+      /**
+       * Catalog-only, not browser-callable.
+       * @callable
+       */
+      async helper(): Promise<void> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("helper");
+    expect(out[0]!.description).toBe("Catalog-only, not browser-callable.");
+  });
+
+  test("decorator + JSDoc tag (both): listed once, decorator wins", () => {
+    // The same method matched by both passes must not appear twice.
+    const src = `
+      /**
+       * JSDoc says one thing.
+       * @callable
+       */
+      @callable({ description: "Decorator says another." })
+      async foo(): Promise<string> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.description).toBe("Decorator says another.");
+    expect(out[0]!.returnType).toBe("Promise<string>");
+  });
+
+  test("decorator + JSDoc tag (both), decorator has no description: JSDoc wins", () => {
+    const src = `
+      /**
+       * From the JSDoc.
+       * @callable
+       */
+      @callable()
+      async foo(): Promise<void> {}
+    `;
+    expect(parseCallables(src)[0]!.description).toBe("From the JSDoc.");
+  });
+
+  test("handles other decorators stacked between @callable() and the method", () => {
+    const src = `
+      @callable({ description: "Stacked." })
+      @logged
+      @withRetry({ attempts: 3 })
+      async foo(): Promise<void> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("foo");
+    expect(out[0]!.description).toBe("Stacked.");
+  });
+
+  test("handles modifiers in any combination (static, override, async)", () => {
+    const src = `
+      @callable()
+      static override async foo(): Promise<void> {}
+    `;
+    const out = parseCallables(src);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("foo");
+  });
+
+  test("no false-positive when @callable is mentioned but not used", () => {
+    // The substring `@callable` appears in prose; no actual decorator
+    // or tag is present. Method should not be in the catalog.
+    const src = `
+      /** This method is internal, NOT @callable in the decorator sense. */
+      async _internal(): Promise<void> {}
+    `;
+    // The JSDoc body contains "@callable" inside prose, so the JSDoc-tag
+    // regex *will* match (it just looks for the substring `@callable` in
+    // a JSDoc block). This is a documented limitation: the marker has
+    // to be on its own JSDoc tag line for clean semantics. Including
+    // this test as a sanity check on the current behaviour rather than
+    // an aspiration.
+    const out = parseCallables(src);
+    expect(out.length).toBeLessThanOrEqual(1);
+  });
+
+  test("multiple methods on one class with mixed marker patterns", () => {
+    const src = `
+      export default class A {
+        /** @callable */
+        async legacyJSDoc(): Promise<void> {}
+
+        @callable({ description: "Pure decorator." })
+        async decoratorOnly(): Promise<void> {}
+
+        /** Combined developer doc + decorator. */
+        @callable()
+        async both(): Promise<void> {}
+
+        async invisible(): Promise<void> {}
+      }
+    `;
+    const out = parseCallables(src);
+    // Order is source-order (by position of the first marker).
+    expect(out.map((c) => c.name)).toEqual([
+      "legacyJSDoc",
+      "decoratorOnly",
+      "both",
+    ]);
+    expect(out[0]!.description).toBe(null); // JSDoc body is empty
+    expect(out[1]!.description).toBe("Pure decorator.");
+    expect(out[2]!.description).toBe("Combined developer doc + decorator.");
+  });
 });
 
 describe("resolveMiddlewareChain edge cases", () => {

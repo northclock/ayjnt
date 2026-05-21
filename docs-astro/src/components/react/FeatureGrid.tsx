@@ -120,7 +120,7 @@ export function FeatureGrid({ items }: Props) {
 											transition={{ duration: 0.3, ease: "easeOut" }}
 											className="overflow-hidden"
 										>
-											<div className="mt-2 grid gap-6 border-t border-dashed border-[var(--rule-strong)] pt-6 lg:grid-cols-[1fr_1.1fr]">
+											<div className="mt-2 grid grid-cols-1 gap-6 border-t border-dashed border-[var(--rule-strong)] pt-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
 												<div className="text-[15px] leading-relaxed text-[var(--ink-soft)]">
 													{item.detail}
 													{item.cta && <div className="mt-4">{item.cta}</div>}

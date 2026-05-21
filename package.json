@@ -48,7 +48,7 @@
     "mcp"
   ],
   "dependencies": {
-    "agents": "0.10.2",
+    "agents": "0.13.1",
     "wrangler": "4.82.1"
   },
   "devDependencies": {

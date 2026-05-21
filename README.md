@@ -175,15 +175,17 @@ export default function NotesApp() {
 
 The Cloudflare Agents SDK transports the call over WebSocket; ayjnt's generated `useAgent()` hook is pre-bound to your agent class so `agent.stub.<method>` autocompletes with every decorated method.
 
+The same `@callable()` decorator also drives `/__ayjnt/catalog` inclusion — ayjnt's build-time scanner sees the decorator on the method and lists it with the `description` from the decorator's options. **One marker covers both browser-callability and catalog discoverability.**
+
 ### When to use which
 
 | Caller | Pattern | Use |
 |---|---|---|
-| Another agent (worker-side) | `getAgent<T>` from `ayjnt/rpc` | Native DO RPC. No decorator needed. |
+| Another agent (worker-side) | `getAgent<T>` from `ayjnt/rpc` | Native DO RPC. No decorator needed — `public` is enough. |
 | Browser UI (React) | `@callable()` decorator + `agent.stub.method()` | WebSocket RPC. Decorator required to expose. |
-| Catalog consumers (tooling) | `/** @callable */` JSDoc tag | Build-time metadata. Surfaces method in `/__ayjnt/catalog`. |
+| Catalog consumers (tooling) | Same `@callable()` decorator | The decorator's `description` option becomes the catalog description. |
 
-The three patterns are orthogonal — a single method can use any combination. See [`examples/callable-client`](./examples/callable-client) for all three on the same agent.
+A legacy `/** @callable */` JSDoc tag still works as a **catalog-only** marker for the rare case where you want a method listed in the catalog but NOT exposed over WebSocket (typically agent-to-agent RPC methods you want discoverable). Most code shouldn't need it. See [`examples/callable-client`](./examples/callable-client).
 
 `@callable()` complements `setState({...})`: use `setState` when the change *is* the new state, `@callable` for server-generated values (fresh UUIDs), conditional logic (`delete if exists`), derived values (`count matching`), and anything that should throw at the boundary.
 
@@ -360,19 +362,21 @@ The only restriction: `docs` is a reserved instance name. You cannot create a Du
 
 ### `@callable` methods
 
-Tag a method with the `@callable` JSDoc tag and it gets surfaced in the catalog along with its parameter signature and return type:
+Cloudflare's `@callable()` decorator from `"agents"` is the primary marker — it makes a method browser-callable AND surfaces it in the catalog:
 
 ```ts
+import { Agent, callable } from "agents";
+
 export default class InventoryAgent extends Agent<Env, State> {
-  /**
-   * Decrement stock for a SKU.
-   * @callable
-   */
+  /** Decrement stock for a SKU. Throws on insufficient stock. */
+  @callable({ description: "Decrement stock for a SKU." })
   async decrement(sku: string, qty: number): Promise<number> { ... }
 }
 ```
 
-Tagging is opt-in. Methods without `@callable` stay private to the class — useful when you want internal helpers to NOT appear in the public catalog.
+The decorator's `description` option becomes the catalog description. If you omit it, ayjnt falls back to the first prose line of the JSDoc immediately above the method. Long-form JSDoc is for editor hover; the short description is for the catalog. **Methods without `@callable()` stay private to the class** and don't appear in the catalog.
+
+For the rare case where you want catalog visibility *without* browser exposure (typically agent-to-agent RPC methods you want discoverable), a legacy `/** @callable */` JSDoc tag still works as a catalog-only marker. See the [client-callable methods section](#client-callable-methods).
 
 ### The catalog endpoint
 

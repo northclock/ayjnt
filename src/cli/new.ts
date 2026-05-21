@@ -156,12 +156,12 @@ function sanitizePackageName(name: string): string {
 
 function packageJson(name: string, template: Template): string {
   const deps: Record<string, string> = {
-    agents: "^0.10",
+    agents: "^0.13",
   };
   const devDeps: Record<string, string> = {
     "@types/bun": "latest",
     "@cloudflare/workers-types": "latest",
-    ayjnt: "^0.1",
+    ayjnt: "^0.5",
     wrangler: "^4",
   };
 
@@ -192,9 +192,7 @@ function packageJson(name: string, template: Template): string {
 function tsconfig(template: Template): string {
   const compilerOptions: Record<string, unknown> = {
     lib:
-      template === "with-ui"
-        ? ["ESNext", "DOM", "DOM.Iterable"]
-        : ["ESNext"],
+      template === "with-ui" ? ["ESNext", "DOM", "DOM.Iterable"] : ["ESNext"],
     target: "ESNext",
     module: "Preserve",
     moduleDetection: "force",

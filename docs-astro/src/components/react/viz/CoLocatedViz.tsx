@@ -21,7 +21,7 @@ export function CoLocatedViz() {
 	}, []);
 
 	return (
-		<div className="grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
+		<div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)]">
 			<Tab count={count} label="tab 1" active={source === "a"} />
 
 			<Arrow direction="right" active={source === "a"} />

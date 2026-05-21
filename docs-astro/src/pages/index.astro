@@ -107,7 +107,7 @@ const interAgentFacts: Array<[string, string]> = [
 		<section class="relative isolate overflow-hidden border-b border-[var(--ink)]">
 			<div class="grid-paper absolute inset-0 opacity-60"></div>
 			<div class="relative mx-auto max-w-6xl px-6 pt-20 pb-24 md:pt-28 md:pb-32">
-				<span class="tag mb-5">v0.1 · Bun-first · for Cloudflare Workers</span>
+				<span class="tag mb-5">v0.5 · Bun-first · for Cloudflare Agents</span>
 				<h1 class="text-balance font-sans text-5xl font-semibold leading-[1.05] tracking-tight md:text-7xl">
 					Write the agent.
 					<br />
@@ -139,7 +139,7 @@ const interAgentFacts: Array<[string, string]> = [
 
 		<!-- Quick start -->
 		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
-			<div class="mx-auto grid max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[1.1fr_1fr]">
+			<div class="mx-auto grid grid-cols-1 max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
 				<div>
 					<h2 class="section-title">Quick start</h2>
 					<p class="mt-4 max-w-lg text-lg leading-relaxed text-[var(--ink-soft)]">
@@ -162,7 +162,7 @@ const interAgentFacts: Array<[string, string]> = [
 
 		<!-- File tree showcase -->
 		<section class="border-b border-[var(--ink)]">
-			<div class="mx-auto grid max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[1fr_1.1fr]">
+			<div class="mx-auto grid grid-cols-1 max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
 				<FileTree client:visible title="agents/ — the whole API" root={fileTreeRoot} />
 				<div>
 					<h2 class="section-title">The folder is the framework</h2>
@@ -172,7 +172,7 @@ const interAgentFacts: Array<[string, string]> = [
 						entrypoint. There is no config file to author — just files and
 						folders.
 					</p>
-					<dl class="mt-8 grid gap-5 sm:grid-cols-2">
+					<dl class="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2">
 						<div>
 							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">agent.ts</dt>
 							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
@@ -239,7 +239,7 @@ const interAgentFacts: Array<[string, string]> = [
 
 		<!-- Inter-agent RPC -->
 		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
-			<div class="mx-auto grid max-w-6xl items-center gap-10 px-6 py-20 md:grid-cols-[1.1fr_1fr]">
+			<div class="mx-auto grid grid-cols-1 max-w-6xl items-center gap-10 px-6 py-20 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
 				<div>
 					<h2 class="section-title">Agents that call each other, typed.</h2>
 					<p class="mt-4 text-lg leading-relaxed text-[var(--ink-soft)]">
@@ -299,7 +299,7 @@ const interAgentFacts: Array<[string, string]> = [
 						All examples →
 					</a>
 				</header>
-				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+				<div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
 					{featured.map((e) => (
 						<ExampleCard client:visible example={e} />
 					))}

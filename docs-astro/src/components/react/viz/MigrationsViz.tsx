@@ -25,7 +25,7 @@ const ENTRIES: Entry[] = [
  */
 export function MigrationsViz() {
 	return (
-		<div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+		<div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
 			<LockfilePanel />
 			<DeployPanel />
 		</div>

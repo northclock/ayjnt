@@ -1,0 +1,113 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs (Astro)",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "docs-astro", "dev"],
+      "port": 4321
+    },
+    {
+      "name": "example: agentic-rag",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/agentic-rag", "dev", "--port", "8787"],
+      "port": 8787
+    },
+    {
+      "name": "example: ai-chatbot",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/ai-chatbot", "dev", "--port", "8788"],
+      "port": 8788
+    },
+    {
+      "name": "example: basic",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/basic", "dev", "--port", "8789"],
+      "port": 8789
+    },
+    {
+      "name": "example: callable-client",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/callable-client", "dev", "--port", "8790"],
+      "port": 8790
+    },
+    {
+      "name": "example: catalog",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/catalog", "dev", "--port", "8791"],
+      "port": 8791
+    },
+    {
+      "name": "example: chat-rooms",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/chat-rooms", "dev", "--port", "8792"],
+      "port": 8792
+    },
+    {
+      "name": "example: chess",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/chess", "dev", "--port", "8793"],
+      "port": 8793
+    },
+    {
+      "name": "example: inter-agent",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/inter-agent", "dev", "--port", "8794"],
+      "port": 8794
+    },
+    {
+      "name": "example: mcp",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/mcp", "dev", "--port", "8795"],
+      "port": 8795
+    },
+    {
+      "name": "example: middleware",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/middleware", "dev", "--port", "8796"],
+      "port": 8796
+    },
+    {
+      "name": "example: mission-control",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/mission-control", "dev", "--port", "8797"],
+      "port": 8797
+    },
+    {
+      "name": "example: recurring-tasks",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/recurring-tasks", "dev", "--port", "8798"],
+      "port": 8798
+    },
+    {
+      "name": "example: scheduled-tasks",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/scheduled-tasks", "dev", "--port", "8799"],
+      "port": 8799
+    },
+    {
+      "name": "example: scheduler",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/scheduler", "dev", "--port", "8800"],
+      "port": 8800
+    },
+    {
+      "name": "example: space-game",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/space-game", "dev", "--port", "8801"],
+      "port": 8801
+    },
+    {
+      "name": "example: with-client",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/with-client", "dev", "--port", "8802"],
+      "port": 8802
+    },
+    {
+      "name": "example: with-ui",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "examples/with-ui", "dev", "--port", "8803"],
+      "port": 8803
+    }
+  ]
+}

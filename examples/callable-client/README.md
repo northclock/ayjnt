@@ -2,13 +2,22 @@
 
 Demonstrates the **Cloudflare Agents `@callable()` decorator** — agent
 methods callable directly from a browser UI over WebSocket via
-`agent.stub.method(args)`.
+`agent.stub.method(args)`, with the same decorator also driving
+inclusion in `/__ayjnt/catalog`.
 
-This is a different mechanism from agent-to-agent RPC (`getAgent<T>`,
-covered in `examples/inter-agent`) and from ayjnt's `/** @callable */`
-JSDoc tag (which is build-time metadata for the catalog, covered in
-`examples/catalog`). The example uses **all three** on the same
-methods so you can see how they layer.
+The example shows the **two "callable" patterns** that exist in this
+framework after the unification:
+
+1. **`@callable()` decorator from `"agents"`** — primary. Makes the
+   method browser-callable AND lists it in the catalog. One source of
+   truth for the public RPC surface.
+2. **`/** @callable */` JSDoc tag** — legacy fallback. Useful only for
+   catalog-only methods (no browser exposure). Most code shouldn't
+   need it.
+
+The third "callable" path — agent-to-agent RPC via `getAgent<T>` —
+doesn't need either marker; TypeScript's `public` is enough.
+See `examples/inter-agent` for that.
 
 ## What the agent looks like
 
@@ -19,11 +28,8 @@ import type { GeneratedEnv } from "@ayjnt/env";
 export default class NotesAgent extends Agent<GeneratedEnv, State> {
   override initialState: State = { notes: [] };
 
-  /**
-   * Add a new note to the list.
-   * @callable                                              ← ayjnt JSDoc → catalog
-   */
-  @callable({ description: "Add a new note." })            // ← CF decorator → WebSocket RPC
+  /** Add a note. The agent generates the id; only the server can. */
+  @callable({ description: "Add a new note." })            // ← drives both browser RPC AND catalog
   async addNote(text: string): Promise<Note> {
     const note = { id: crypto.randomUUID(), text, createdAt: Date.now() };
     this.setState({ notes: [...this.state.notes, note] });
@@ -31,6 +37,12 @@ export default class NotesAgent extends Agent<GeneratedEnv, State> {
   }
 }
 ```
+
+The decorator's `description` option becomes the catalog description.
+The long-form JSDoc above the method stays for editor hover — it's
+developer docs, not catalog content. If the decorator has no
+`description` option, the catalog falls back to the JSDoc's first
+prose line.
 
 ## What the UI looks like
 
@@ -72,18 +84,19 @@ work for:
 `@callable()` methods give you all of that with a single decorator
 and a typed proxy on the client.
 
-## How the three patterns layer
+## How the patterns layer
 
-| Pattern | Decorator/Tag | Caller | Transport |
+| Pattern | Marker | Caller | Transport |
 |---|---|---|---|
-| **CF `@callable()`** | `@callable({ description })` from `"agents"` | Browser UI via `agent.stub.method()` | WebSocket frame |
-| **ayjnt `/** @callable */`** | JSDoc tag, parsed by build | `/__ayjnt/catalog` JSON consumers (humans, tools) | HTTP read |
+| **CF `@callable()`** | `@callable({ description })` from `"agents"` | Browser UI via `agent.stub.method()` AND catalog consumers | WebSocket frame + build-time catalog |
+| **ayjnt `/** @callable */`** | JSDoc tag (catalog-only fallback) | `/__ayjnt/catalog` JSON consumers — but NOT the browser | Build-time catalog only |
 | **ayjnt `getAgent<T>`** | None — TypeScript `public` is enough | Other agents inside the worker | Native DO RPC |
 
-The three are orthogonal and combine freely. A method can be public
-to the browser AND advertised in the catalog AND called by another
-agent — all on one definition. Or it can be exposed to just one
-audience.
+The decorator covers both browser-callability and catalog inclusion
+with one marker. The JSDoc tag is a fallback for the rare
+catalog-only case (e.g., an agent-to-agent RPC method you want
+discoverable). `getAgent<T>` works against any public method
+regardless of decoration — `_findById` in `agent.ts` shows this.
 
 ## Run it
 

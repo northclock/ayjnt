@@ -65,45 +65,101 @@ type State = { stock: Record<string, number> };
 
 		<h2>@callable methods</h2>
 		<p>
-			Tag a method with the <code>@callable</code> JSDoc tag and it
-			gets surfaced in the catalog along with its parameter
-			signature, return type, and the first prose line of the
-			JSDoc. Tagging is opt-in — internal helpers without the tag
-			stay private.
+			The catalog lists methods marked with{" "}
+			Cloudflare's <code>@callable()</code> decorator from{" "}
+			<code>"agents"</code> — the same decorator that makes a
+			method invocable from a browser client via{" "}
+			<code>agent.stub.method(...)</code>. One marker drives both
+			browser-callability and catalog discoverability:
 		</p>
 
 		<CodeBlock
 			filename="agents/inventory/agent.ts"
 			lang="ts"
-			code={`export default class InventoryAgent extends Agent<Env, State> {
-  /**
-   * Decrement stock for a SKU. Throws on insufficient stock.
-   * @callable
-   */
+			code={`import { Agent, callable } from "agents";
+
+export default class InventoryAgent extends Agent<Env, State> {
+  /** Decrement stock for a SKU. Throws on insufficient stock. */
+  @callable({ description: "Decrement stock for a SKU." })
   async decrement(sku: string, qty: number): Promise<number> {
     /* ... */
   }
 
-  /** Internal helper — NOT in the catalog. */
+  /** Internal helper — NOT in the catalog (no decorator). */
   private _seed(): void { /* ... */ }
 }`}
-			highlightLines={[3, 4, 5]}
+			highlightLines={[4, 5, 6]}
 		/>
 
+		<p>
+			Description precedence in the catalog:
+		</p>
+		<ol>
+			<li>
+				<code>{`@callable({ description: "…" })`}</code> — the
+				decorator's option (wins).
+			</li>
+			<li>
+				First prose line of the JSDoc immediately above the
+				method (fallback when the decorator has no{" "}
+				<code>description</code>).
+			</li>
+			<li>
+				<code>null</code>.
+			</li>
+		</ol>
+		<p>
+			Long-form JSDoc stays available for editor hover regardless
+			of which line ends up in the catalog.{" "}
+			<strong>Methods without the decorator stay private</strong>{" "}
+			to the class and don't appear in the catalog.
+		</p>
+
+		<h3>Legacy JSDoc tag</h3>
+		<p>
+			A <code>/** @callable */</code> JSDoc tag still works as a{" "}
+			<em>catalog-only</em> fallback for the rare case where you
+			want a method listed in the catalog but NOT exposed over
+			WebSocket — typically an agent-to-agent RPC method you want
+			discoverable without making it browser-callable:
+		</p>
+
+		<CodeBlock
+			lang="ts"
+			code={`/**
+ * Re-seed the notes from a snapshot. Agent-to-agent RPC only —
+ * listed in the catalog but not browser-callable.
+ * @callable
+ */
+async reseed(snapshot: Note[]): Promise<void> { /* ... */ }`}
+		/>
+
+		<p>
+			Most code shouldn't need it — if a method is part of your
+			public surface, decorate it.
+		</p>
+
 		<Callout type="info" title="Parsed source-level — keep signatures on one line">
-			The scanner is line-based to keep the framework
-			dependency-light. Three constraints:
+			Both markers are detected by regex (no full TS parse).
+			Constraints to keep in mind:
 			<ul>
-				<li>The JSDoc must immediately precede the method.</li>
-				<li>The parameter list must fit on one line.</li>
+				<li>Parameter list must fit on one line.</li>
 				<li>
-					Return-type annotations may not contain a top-level{" "}
-					<code>{"{"}</code> — object literal types as the return
-					annotation aren't supported.
+					Return-type annotation may not contain a top-level{" "}
+					<code>{"{"}</code> — object literal return types
+					aren't supported.
+				</li>
+				<li>
+					Decorator detection doesn't follow import aliases.
+					Write <code>@callable(...)</code> literally, not{" "}
+					<code>@cb(...)</code> after renaming the import.
+				</li>
+				<li>
+					Decorator args with nested parens (e.g. an arrow
+					function inside the options object) confuse the
+					non-greedy capture — stick to plain object literals.
 				</li>
 			</ul>
-			These match the same line-based extractor the framework uses
-			for class names and <code>agentId</code> overrides.
 		</Callout>
 
 		<h2>The /__ayjnt/catalog endpoint</h2>

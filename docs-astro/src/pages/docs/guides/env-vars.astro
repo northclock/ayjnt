@@ -1,0 +1,364 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+
+// Hoisted so embedded ${} and backticks don't confuse the Astro JSX parser.
+const agentEnvCode = `import { Agent } from "agents";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+// GeneratedEnv carries every DO binding ayjnt scanned out of agents/.
+// Extend it with the secrets and config the agent reads at runtime.
+type Env = GeneratedEnv & {
+  GOOGLE_API_KEY: string;
+  FEATURE_FLAG_NEW_INDEX?: string;
+};
+
+export default class ChatAgent extends Agent<Env> {
+  override async onRequest(request: Request): Promise<Response> {
+    const apiKey = this.env.GOOGLE_API_KEY;   // typed string
+    const flag = this.env.FEATURE_FLAG_NEW_INDEX ?? "off";
+    // ...
+    return Response.json({ ok: true, flag });
+  }
+}`;
+
+const middlewareEnvCode = `import type { Middleware } from "ayjnt/middleware";
+import type { GeneratedEnv } from "@ayjnt/env";
+
+type Env = GeneratedEnv & { AUTH_SECRET: string };
+
+const middleware = (async (c, next) => {
+  const header = c.request.headers.get("authorization");
+  if (header !== \`Bearer \${c.env.AUTH_SECRET}\`) {   // typed string
+    return c.text("forbidden", 403);
+  }
+  return next();
+}) satisfies Middleware<Env>;
+
+export default middleware;`;
+
+const devVarsExample = `# .dev.vars  (project root, gitignored)
+GOOGLE_API_KEY=ya29.…
+AUTH_SECRET=local-only-secret
+FEATURE_FLAG_NEW_INDEX=on`;
+
+const devVarsExampleSample = `# .dev.vars.example  (checked into git as a template)
+#
+# Copy to .dev.vars and fill in real values. Listed bindings let
+# collaborators know which env vars the agent needs to run.
+GOOGLE_API_KEY=
+AUTH_SECRET=
+FEATURE_FLAG_NEW_INDEX=`;
+
+const wranglerSecretCommands = `# Add or overwrite a secret in the deployed worker
+wrangler secret put GOOGLE_API_KEY
+# (paste the value when prompted)
+
+# List the secret names currently bound to the worker
+wrangler secret list
+
+# Remove a secret
+wrangler secret delete GOOGLE_API_KEY`;
+---
+<DocsLayout
+	title="Environment variables & secrets — ayjnt docs"
+	description="How to read and inject env vars in ayjnt agents and middleware. Covers .dev.vars for local dev, wrangler secret put for production, per-environment files, and the typed GeneratedEnv extension pattern."
+>
+	<DocPageShell
+		slug="guides/env-vars"
+		lede="ayjnt agents and middleware read env vars exactly like raw Cloudflare Workers — through env.<NAME>. The framework only adds two things on top: a typed GeneratedEnv you can extend, and an automatic .dev.vars sync so wrangler can find your project-root secrets during dev."
+	>
+		<h2>Reading values</h2>
+
+		<h3>In an agent</h3>
+		<p>
+			Every agent gets <code>this.env</code> typed as its{" "}
+			<code>Env</code> generic parameter. Extend the framework's{" "}
+			<code>GeneratedEnv</code> (which already carries every DO
+			binding ayjnt scanned from <code>agents/</code>) with the
+			secrets and config the agent reads at runtime:
+		</p>
+		<CodeBlock
+			filename="agents/chat/agent.ts"
+			lang="ts"
+			code={agentEnvCode}
+			highlightLines={[6, 7, 8, 9, 13]}
+		/>
+		<p>
+			Field names are conventionally uppercase snake_case to match
+			the wrangler / shell convention, but TypeScript doesn't
+			require it. Mark fields optional when the agent has a
+			fallback path for the missing-value case.
+		</p>
+
+		<h3>In middleware</h3>
+		<p>
+			Middleware sees the same <code>env</code> on its{" "}
+			<code>Context</code> argument. Type the{" "}
+			<code>Middleware</code> generic to get autocomplete on{" "}
+			<code>c.env.*</code>:
+		</p>
+		<CodeBlock
+			filename="agents/middleware.ts"
+			lang="ts"
+			code={middlewareEnvCode}
+			highlightLines={[4, 8, 13]}
+		/>
+		<p>
+			The same <code>Env</code> type can (and usually should) be
+			shared between an agent and the middleware that gates it —
+			either inline-typed in both files or imported from a small
+			shared module under <code>agents/</code>.
+		</p>
+
+		<h2>Setting values</h2>
+
+		<p>
+			Cloudflare Workers separates env vars into <strong>secrets</strong>{" "}
+			(write-only, encrypted at rest, set via{" "}
+			<code>wrangler secret put</code> or the dashboard) and{" "}
+			<strong>plain vars</strong> (declared in{" "}
+			<code>wrangler.jsonc</code>, visible in source). For ayjnt
+			projects the most natural pattern is <strong>treat
+			everything as a secret</strong> in production — there's no
+			loss of expressiveness, and you avoid having to wire a
+			static-config surface through the generated{" "}
+			<code>wrangler.jsonc</code>.
+		</p>
+
+		<h3>Local dev — <code>.dev.vars</code> at the project root</h3>
+		<p>
+			Drop a <code>.dev.vars</code> file at the project root (the
+			directory with your <code>package.json</code>) and ayjnt
+			automatically mirrors it into{" "}
+			<code>.ayjnt/dist/</code> on every build so wrangler picks
+			it up:
+		</p>
+		<CodeBlock
+			filename=".dev.vars"
+			lang="sh"
+			code={devVarsExample}
+		/>
+		<p>
+			The mirror is a relative <strong>symlink</strong>, so live
+			edits to the source file propagate to{" "}
+			<code>wrangler dev</code> without a rebuild. On Windows
+			without developer mode the framework falls back to a copy
+			and warns that mid-session edits won't auto-reload — re-run{" "}
+			<code>ayjnt build</code> after changing secrets.
+		</p>
+
+		<Callout kind="warn" title="Why the framework does this">
+			Wrangler resolves <code>.dev.vars</code> relative to the
+			directory containing <code>wrangler.jsonc</code> (called{" "}
+			<code>configDir</code>), not its working directory. Our
+			generated config lives in <code>.ayjnt/dist/</code>, so
+			without the mirror your project-root <code>.dev.vars</code>{" "}
+			would be invisible. If you're on a version older than v0.5.4
+			and seeing missing vars in dev, that's the cause — upgrade
+			or manually copy the file into <code>.ayjnt/dist/</code>.
+		</Callout>
+
+		<h3>Per-environment overrides — <code>.dev.vars.&lt;env&gt;</code></h3>
+		<p>
+			When you run <code>wrangler dev --env staging</code>{" "}
+			(forwarded automatically through{" "}
+			<code>ayjnt dev --env staging</code>), wrangler loads{" "}
+			<code>.dev.vars.staging</code> in addition to (and
+			overriding) <code>.dev.vars</code>. ayjnt mirrors every{" "}
+			<code>.dev.vars.&lt;env&gt;</code> sibling alongside the
+			base file, so all environments work the same way:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`# Project root
+.dev.vars              # default values
+.dev.vars.staging      # loaded by  ayjnt dev --env staging
+.dev.vars.production   # loaded by  ayjnt dev --env production
+.dev.vars.example      # checked-in template; NEVER synced (treated as a sample)`}
+		/>
+
+		<h3>Production — <code>wrangler secret put</code></h3>
+		<p>
+			For deployed workers, set each secret with the wrangler CLI.
+			Values land in the worker's encrypted secret store and are
+			visible to your code as <code>env.NAME</code>, exactly like{" "}
+			<code>.dev.vars</code> entries during dev:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={wranglerSecretCommands}
+		/>
+		<p>
+			<code>wrangler secret put</code> writes to whatever worker the
+			active <code>wrangler.jsonc</code> targets — which means
+			running it from your project root, with ayjnt's generated
+			config selected, just works.
+		</p>
+
+		<h2>Don't commit secrets</h2>
+		<p>
+			The scaffold ayjnt generates with <code>bunx ayjnt new</code>{" "}
+			already includes <code>.dev.vars</code>,{" "}
+			<code>.env</code>, and <code>.env.local</code> in{" "}
+			<code>.gitignore</code>. If you didn't scaffold with that
+			template, add them yourself. The conventional way to document
+			required env vars without leaking real values is to commit a{" "}
+			<code>.dev.vars.example</code>:
+		</p>
+		<CodeBlock
+			filename=".dev.vars.example"
+			lang="sh"
+			code={devVarsExampleSample}
+		/>
+		<p>
+			The framework skips <code>.dev.vars.example</code> in the
+			sync — it's a checked-in template, not real config, and
+			mirroring it would shadow real values during dev.
+		</p>
+
+		<h2>Typing checklist</h2>
+		<ol>
+			<li>
+				Extend <code>GeneratedEnv</code> from{" "}
+				<code>@ayjnt/env</code> with each binding the agent or
+				middleware reads.
+			</li>
+			<li>
+				Use the extended type as the <code>Env</code> generic on
+				the agent (<code>extends Agent&lt;Env, State&gt;</code>)
+				and on any{" "}
+				<code>Middleware&lt;Env&gt; satisfies Middleware</code>.
+			</li>
+			<li>
+				Mark fields optional when the runtime has a fallback. This
+				gives you type-narrowed code at the use site (e.g.{" "}
+				<code>this.env.X ?? "default"</code>) instead of casting.
+			</li>
+			<li>
+				Share <code>Env</code> across files by hoisting it into a
+				small module (e.g.{" "}
+				<code>agents/&lt;route&gt;/shared.ts</code>) when an agent
+				and its middleware both touch the same bindings.
+			</li>
+		</ol>
+
+		<Callout kind="note" title="Static (non-secret) vars in wrangler.jsonc">
+			Cloudflare's <code>vars</code> field in{" "}
+			<code>wrangler.jsonc</code> is for non-secret static config
+			that's visible in source control. ayjnt regenerates the
+			whole <code>wrangler.jsonc</code> on each build, so editing
+			it by hand doesn't survive. For now, treat every env var
+			as a secret (either <code>.dev.vars</code> locally or{" "}
+			<code>wrangler secret put</code> in prod) — operationally
+			identical from your code's perspective, and avoids the
+			static-config gap entirely.
+		</Callout>
+
+		<h2>Lifecycle</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Stage</th>
+					<th>Where values live</th>
+					<th>How wrangler finds them</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>ayjnt dev</code>
+					</td>
+					<td>
+						<code>.dev.vars</code> at the project root (and{" "}
+						<code>.dev.vars.&lt;env&gt;</code> for{" "}
+						<code>--env</code>).
+					</td>
+					<td>
+						ayjnt symlinks them into{" "}
+						<code>.ayjnt/dist/</code>; wrangler reads them as
+						if they lived next to the config.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>ayjnt deploy</code>
+					</td>
+					<td>
+						Cloudflare's encrypted secret store (set via{" "}
+						<code>wrangler secret put</code> or the dashboard).
+					</td>
+					<td>
+						Stored per-worker; merged into{" "}
+						<code>env</code> at request time.
+					</td>
+				</tr>
+				<tr>
+					<td>Both</td>
+					<td>
+						Your code reads <code>this.env.X</code> /{" "}
+						<code>c.env.X</code> identically.
+					</td>
+					<td>The framework doesn't distinguish — same binding name, same type.</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>Troubleshooting</h2>
+		<ul>
+			<li>
+				<strong>
+					Project-root <code>.dev.vars</code> doesn't seem to be
+					picked up.
+				</strong>{" "}
+				Pre-v0.5.4 the framework didn't mirror it. Upgrade, or
+				manually copy <code>.dev.vars</code> into{" "}
+				<code>.ayjnt/dist/.dev.vars</code> as a one-shot. See the{" "}
+				<a href="/docs/gotchas" class="link-underline">
+					gotchas page
+				</a>
+				.
+			</li>
+			<li>
+				<strong>
+					<code>this.env.X</code> shows up as <code>unknown</code>{" "}
+					in editor.
+				</strong>{" "}
+				The agent's <code>Env</code> generic doesn't extend{" "}
+				<code>GeneratedEnv</code> with that field. Add it to the
+				extension above and the autocomplete returns.
+			</li>
+			<li>
+				<strong>
+					Different vars per environment without restarting the
+					whole dev loop.
+				</strong>{" "}
+				Use <code>.dev.vars.staging</code> +{" "}
+				<code>ayjnt dev --env staging</code> rather than juggling
+				one file with conditional logic.
+			</li>
+			<li>
+				<strong>I deleted .dev.vars but wrangler still sees old values.</strong>{" "}
+				A re-run of <code>ayjnt build</code> (or{" "}
+				<code>ayjnt dev</code>) cleans up the stale mirror in{" "}
+				<code>.ayjnt/dist/</code>. The cleanup is automatic but
+				only fires on build, not on file deletion alone.
+			</li>
+		</ul>
+
+		<p>
+			Real-world references:{" "}
+			<a href="/examples/ai-chatbot" class="link-underline">
+				examples/ai-chatbot
+			</a>{" "}
+			uses a Gemini API key from <code>.dev.vars</code> in dev.{" "}
+			<a href="/examples/agentic-rag" class="link-underline">
+				examples/agentic-rag
+			</a>{" "}
+			uses Cloudflare account id + API token, and ships a{" "}
+			<code>.dev.vars.example</code> template.
+		</p>
+	</DocPageShell>
+</DocsLayout>

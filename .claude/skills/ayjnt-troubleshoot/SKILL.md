@@ -136,6 +136,41 @@ try {
 }
 ```
 
+## "`.dev.vars` at the project root is ignored by wrangler"
+
+**Cause.** Wrangler resolves `.dev.vars` relative to the directory
+containing `wrangler.jsonc` (called `configDir`), **not** to its
+working directory. ayjnt's generated config lives in `.ayjnt/dist/`,
+so without intervention wrangler only sees a `.dev.vars` that's
+inside `.ayjnt/dist/` — and the user's project-root copy never makes
+it through.
+
+**Fix (automatic).** Framework v0.5.4+ mirrors every project-root
+`.dev.vars` and `.dev.vars.<env>` into `.ayjnt/dist/` on each build,
+using a **relative symlink** so edits to the source file propagate
+live (no rebuild needed for secret changes). Stale mirrors are
+cleaned up automatically when the project-root file is deleted.
+On filesystems that refuse symlinks (Windows without developer mode
+→ `EPERM`), the build falls back to a copy and warns that
+mid-session secret edits won't auto-reload.
+
+**Verify.** After `ayjnt build` or `ayjnt dev`:
+
+```sh
+ls -la .ayjnt/dist/.dev.vars
+# lrwxr-xr-x  …  .ayjnt/dist/.dev.vars -> ../../.dev.vars
+```
+
+If you see the symlink, wrangler is loading your secrets.
+
+If the file is missing from `.ayjnt/dist/`:
+1. Confirm `.dev.vars` exists at the project root (not under any
+   subdirectory).
+2. Confirm the filename isn't `.dev.vars.example` (sample files are
+   intentionally skipped — they're checked-in templates, not real
+   secrets).
+3. Re-run `bun run build`.
+
 ## "Renamed an agent class and lost storage"
 
 **Cause.** When `agentId` isn't pinned, the default ID derives from

@@ -10,7 +10,7 @@ import { motion } from "framer-motion";
 export function RpcViz() {
 	return (
 		<div className="relative isolate">
-			<div className="grid grid-cols-[1fr_120px_1fr] items-center gap-0">
+			<div className="grid grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)] items-center gap-0">
 				<Agent
 					name="OrdersAgent"
 					sub="customer-42"
@@ -26,7 +26,7 @@ export function RpcViz() {
 				/>
 			</div>
 
-			<div className="mt-3 grid grid-cols-[1fr_120px_1fr] items-center gap-0 text-center font-mono text-[10px] uppercase tracking-widest text-[var(--ink-muted)]">
+			<div className="mt-3 grid grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)] items-center gap-0 text-center font-mono text-[10px] uppercase tracking-widest text-[var(--ink-muted)]">
 				<span>caller</span>
 				<span>Workers RPC</span>
 				<span>callee</span>

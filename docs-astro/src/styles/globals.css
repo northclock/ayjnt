@@ -88,12 +88,24 @@ body {
 }
 
 /* Reusable card surface: white-ish paper, crisp border, soft shadow.
- * The "engineering diagram" block. */
+ * The "engineering diagram" block.
+ *
+ * `min-width: 0` is load-bearing here. Cards almost always sit inside
+ * a grid or flex layout, and grid/flex items default to
+ * `min-width: auto` — they refuse to shrink below their intrinsic
+ * content width. A card holding a long `<pre>` (CodeBlock, Terminal)
+ * or a long URL (the reference cards on /docs) then pushes its
+ * column wider than the viewport on narrow screens, causing the
+ * whole document to horizontally scroll. Setting `min-width: 0`
+ * here lets the card honour its parent's track size; the inner
+ * overflowing element handles its own scroll (e.g. <pre> has
+ * `overflow-x: auto`, the truncate divs have `truncate`). */
 .card {
 	background: color-mix(in srgb, var(--paper) 85%, white 15%);
 	border: 1px solid var(--ink);
 	box-shadow: 3px 3px 0 var(--ink);
 	transition: box-shadow 150ms ease, transform 150ms ease;
+	min-width: 0;
 }
 @media (prefers-color-scheme: dark) {
 	.card {

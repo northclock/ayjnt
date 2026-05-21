@@ -97,8 +97,18 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 				</a>
 			</header>
 
-			<div class="grid gap-6 p-5 md:grid-cols-[1fr_1.1fr] md:gap-8 md:p-8">
-				<ol class="flex flex-col gap-5">
+			<div class="grid grid-cols-1 gap-6 p-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:gap-8 md:p-8">
+				{/*
+				  min-w-0 on the <ol> + on the inner <span> wrapping
+				  the command text. The <pre> already has
+				  overflow-x-auto, but without min-w-0 on both grid
+				  ancestors the <pre> sizes to its content (the
+				  longest curl URL) and pushes the page-level scroll
+				  width past the viewport. With min-w-0 the <pre>
+				  shrinks to its grid track and its own horizontal
+				  scrollbar kicks in for over-long lines.
+				*/}
+				<ol class="flex min-w-0 flex-col gap-5">
 					{quickStartSteps.map((step) => (
 						<li class="flex items-start gap-3">
 							<span class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center border border-[var(--ink)] bg-[var(--paper)] font-mono text-[11px] font-semibold">
@@ -114,7 +124,7 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 									</span>
 								</div>
 								<pre class="mt-2 overflow-x-auto border border-[var(--rule-strong)] bg-[var(--paper)] px-3 py-2 font-mono text-[12.5px] leading-snug">
-									<span class="mr-2 text-[var(--amber)]">$</span><span>{step.command}</span>
+									<span class="mr-2 text-[var(--amber)]">$</span><span class="break-all">{step.command}</span>
 								</pre>
 							</div>
 						</li>
@@ -142,7 +152,7 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 							{section.title}
 						</h2>
 					</header>
-					<ol class="grid gap-3 md:grid-cols-2">
+					<ol class="grid grid-cols-1 gap-3 md:grid-cols-2">
 						{section.items.map((item) => (
 							<li>
 								<a
@@ -182,16 +192,22 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 				(Workers AI, D1, R2, KV bindings, etc.) consult the official docs.
 				ayjnt is not affiliated with Cloudflare.
 			</p>
-			<ul class="grid gap-3 md:grid-cols-2">
+			<ul class="grid grid-cols-1 gap-3 md:grid-cols-2">
 				{cloudflareRefs.map((item) => (
 					<li>
 						<a
 							href={item.href}
 							target="_blank"
 							rel="noreferrer"
-							class="card card-interactive flex items-center justify-between p-4"
+							class="card card-interactive flex items-center justify-between gap-3 p-4"
 						>
-							<div>
+							{/*
+							  `min-w-0 flex-1` is required for `truncate` on the
+							  URL line below to take effect — without it the
+							  wrapper grows to the URL's intrinsic width and
+							  truncate has nothing to clip to.
+							*/}
+							<div class="min-w-0 flex-1">
 								<div class="font-mono text-[13px] font-semibold">
 									{item.title}
 								</div>

@@ -11,7 +11,7 @@ const currentPath = Astro.url.pathname;
 const { title, description } = Astro.props;
 ---
 <BaseLayout title={title} description={description}>
-	<div class="mx-auto grid max-w-[1320px] grid-cols-1 md:grid-cols-[260px_1fr]">
+	<div class="mx-auto grid max-w-[1320px] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
 		<aside class="border-b border-[var(--ink)] md:border-b-0">
 			<DocsSidebar currentPath={currentPath} />
 		</aside>

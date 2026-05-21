@@ -10,7 +10,7 @@ import type UsersAgent from "../../../agents/users/agent.ts";
 export type { default as UsersAgent } from "../../../agents/users/agent.ts";
 
 type Instance = InstanceType<typeof UsersAgent>;
-type DefaultState = Instance extends { state: infer S } ? S : unknown;
+type AgentState = Instance extends { state: infer S } ? S : unknown;
 
 /**
  * React hook bound to UsersAgent. Derives `basePath` from the agent's
@@ -18,18 +18,28 @@ type DefaultState = Instance extends { state: infer S } ? S : unknown;
  * URL. Pass `name` to override the instance:
  *
  *   const agent = useAgent();                       // URL-derived
- *   const agent = useAgent({ name: "room-42" });    // explicit
- *   const agent = useAgent<MyState>();              // custom State type
+ *   const agent = useAgent({ name: "room-42" });    // explicit instance
+ *
+ * The return type carries through to `agent.stub.<method>(...)` and
+ * `agent.call("<method>", [...])` — every method on UsersAgent
+ * decorated with `@callable()` from "agents" is reachable with full
+ * argument and return-type checking.
+ *
+ * The hook is bound to UsersAgent's own state shape — there's no
+ * State generic. Renaming a field on the agent's State propagates here
+ * automatically on the next `ayjnt build`. If you genuinely need a
+ * different shape on the client side, narrow at the use site instead
+ * of overriding the type.
  */
-export function useAgent<State = DefaultState>(
-  options?: Omit<UseAgentOptions<State>, "agent" | "basePath"> & {
+export function useAgent(
+  options?: Omit<UseAgentOptions<AgentState>, "agent" | "basePath"> & {
     /** Override the URL-derived instance name. */
     name?: string;
   },
-): ReturnType<typeof useAgentUpstream<State>> {
+): ReturnType<typeof useAgentUpstream<Instance, AgentState>> {
   const { name: overrideName, ...rest } = options ?? {};
   const instanceName = overrideName ?? deriveInstance();
-  return useAgentUpstream<State>({
+  return useAgentUpstream<Instance, AgentState>({
     agent: "UsersAgent",
     basePath: "users" + "/" + instanceName,
     ...rest,

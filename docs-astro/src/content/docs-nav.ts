@@ -103,6 +103,12 @@ export const DOCS_SECTIONS: DocsSection[] = [
 					"Extending McpAgent, registering tools, streamable HTTP and SSE, Claude Desktop integration.",
 			},
 			{
+				slug: "guides/env-vars",
+				title: "Environment variables & secrets",
+				blurb:
+					"Reading env via this.env / c.env, typing via GeneratedEnv, .dev.vars for local dev (auto-synced into .ayjnt/dist/), wrangler secret put for production.",
+			},
+			{
 				slug: "guides/migrations",
 				title: "Migrations",
 				blurb:
