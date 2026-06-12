@@ -9,7 +9,14 @@ try {
   await run(process.argv.slice(2));
 } catch (err) {
   if (err instanceof Error) {
-    console.error(`\nayjnt: ${err.message}`);
+    // Expected failures (validation, git preflight, …) read best as a
+    // single line. The stack is one env var away for the unexpected ones.
+    if (process.env["AYJNT_DEBUG"]) {
+      console.error(`\nayjnt: ${err.stack ?? err.message}`);
+    } else {
+      console.error(`\nayjnt: ${err.message}`);
+      console.error("(set AYJNT_DEBUG=1 for a stack trace)");
+    }
   } else {
     console.error("\nayjnt: unknown error", err);
   }

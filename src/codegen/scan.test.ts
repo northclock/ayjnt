@@ -13,8 +13,11 @@ import {
   importsAyjntBrowser,
   parseAgentSource,
   parseCallables,
+  parseWorkflowSource,
   resolveMiddlewareChain,
   scan,
+  scanWorkflows,
+  stripComments,
 } from "./scan.ts";
 
 describe("parseAgentSource", () => {
@@ -813,5 +816,194 @@ describe("classNameToKebab", () => {
 
   test("single word", () => {
     expect(classNameToKebab("Foo")).toBe("foo");
+  });
+});
+
+describe("stripComments", () => {
+  test("blanks line and block comments, preserving newlines", () => {
+    const out = stripComments("a // gone\n/* also\ngone */ b");
+    expect(out).toContain("a");
+    expect(out).toContain("b");
+    expect(out).not.toContain("gone");
+    expect(out.split("\n")).toHaveLength(3);
+  });
+
+  test("comment markers inside strings are NOT stripped", () => {
+    const src = `const url = "https://example.com"; const re = 'has /* inside */';`;
+    expect(stripComments(src)).toBe(src);
+  });
+
+  test("string-looking text inside comments does not survive", () => {
+    const out = stripComments(`/* import { x } from "ayjnt/browser" */`);
+    expect(out).not.toContain("ayjnt/browser");
+  });
+
+  test("template literals are preserved", () => {
+    const src = "const t = `keep // this and /* this */`;";
+    expect(stripComments(src)).toBe(src);
+  });
+});
+
+describe("block-comment shadowing regressions", () => {
+  test("a block-commented old class does not shadow the live one", () => {
+    const parsed = parseAgentSource(`/*
+export default class OldAgent extends Agent {}
+*/
+export default class NewAgent extends Agent {}
+`);
+    expect(parsed?.className).toBe("NewAgent");
+  });
+
+  test("a block-commented agentId does not shadow the live one", () => {
+    const parsed = parseAgentSource(`/*
+export const agentId = "old_id";
+*/
+export const agentId = "new_id";
+export default class A extends Agent {}
+`);
+    expect(parsed?.agentId).toBe("new_id");
+  });
+
+  test("a block-commented workflow class does not shadow the live one", () => {
+    const parsed = parseWorkflowSource(`/*
+export default class OldWorkflow extends AgentWorkflow {}
+*/
+export default class NewWorkflow extends AgentWorkflow {}
+`);
+    expect(parsed?.className).toBe("NewWorkflow");
+  });
+
+  test("agentId value may contain the other quote characters", () => {
+    const parsed = parseAgentSource(
+      `export const agentId = "it's-v1";\nexport default class A extends Agent {}`,
+    );
+    expect(parsed?.agentId).toBe("it's-v1");
+  });
+
+  test("withVoice inside a string literal does not flip voice detection", () => {
+    // The old regex-based comment stripper corrupted string literals
+    // containing /* … */ and could blank out real code after them.
+    const src = `const note = "/* watch out */";
+const V = withVoice(Agent);`;
+    expect(detectWithVoice(src)).toBe(true);
+  });
+});
+
+describe("parseCallables paren handling", () => {
+  test("callback-typed parameters (one nesting level) survive", () => {
+    const out = parseCallables(`class A {
+  @callable({ description: "Run with callback." })
+  async run(cb: (x: number) => void): Promise<void> {}
+}`);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.params).toBe("cb: (x: number) => void");
+  });
+
+  test("JSDoc-tagged method with parenthesized param type survives", () => {
+    const out = parseCallables(`class A {
+  /**
+   * Filter items.
+   * @callable
+   */
+  async filter(opts: (string | number)[]): Promise<void> {}
+}`);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.params).toBe("opts: (string | number)[]");
+  });
+
+  test("decorator args with nested parens (arrow in options) parse", () => {
+    const out = parseCallables(`class A {
+  @callable({ description: "hi (yes)" })
+  async greet(): Promise<string> {}
+}`);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.description).toBe("hi (yes)");
+  });
+
+  test("an unmatched @callable( among stacked decorators fails in linear time", () => {
+    // Regression for exponential backtracking: 24 stacked decorators after
+    // a failing @callable used to take >10s; must now be near-instant.
+    const stacked = Array.from({ length: 24 }, (_, i) => `@dec${i}(arg)`).join("\n  ");
+    const src = `class A {
+  @callable({ deep: ((x) => (y) => x)(1) })
+  ${stacked}
+  notAMethod = 5;
+}`;
+    const start = performance.now();
+    const out = parseCallables(src);
+    expect(performance.now() - start).toBeLessThan(250);
+    // And the parse outcome is pinned too: over-nested decorator args are a
+    // documented limitation that yields no callables — a future regex change
+    // must not get fast by emitting garbage instead.
+    expect(out).toEqual([]);
+  });
+});
+
+describe("scan validation", () => {
+  test("agent.ts directly in agents/ fails fast with guidance", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-rootagent-"));
+    await mkdir(path.join(tmp, "agents"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/agent.ts"),
+      `export default class RootAgent extends Agent {}`,
+    );
+    await expect(scan(tmp)).rejects.toThrow(/must live in a subfolder/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("group-only folder (route would be /) fails fast with guidance", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-grouponly-"));
+    await mkdir(path.join(tmp, "agents/(public)"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/(public)/agent.ts"),
+      `export default class PublicAgent extends Agent {}`,
+    );
+    await expect(scan(tmp)).rejects.toThrow(/route group/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("a class deriving a framework-reserved binding is rejected", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-reserved-"));
+    await mkdir(path.join(tmp, "agents/assets"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/assets/agent.ts"),
+      `export default class Assets extends Agent {}`,
+    );
+    await expect(scan(tmp)).rejects.toThrow(/reserves/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("scanWorkflows scoping", () => {
+  test("only agents/ and workflows/ are scanned — node_modules is not walked", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-wfscope-"));
+    await mkdir(path.join(tmp, "agents/orders"), { recursive: true });
+    await mkdir(path.join(tmp, "workflows/cleanup"), { recursive: true });
+    await mkdir(path.join(tmp, "node_modules/evil"), { recursive: true });
+    await mkdir(path.join(tmp, "src/jobs"), { recursive: true });
+    const wf = (name: string) =>
+      `export default class ${name} extends AgentWorkflow {}`;
+    await writeFile(path.join(tmp, "agents/orders/workflow.ts"), wf("OrdersFlow"));
+    await writeFile(path.join(tmp, "workflows/cleanup/workflow.ts"), wf("CleanupFlow"));
+    await writeFile(path.join(tmp, "node_modules/evil/workflow.ts"), wf("EvilFlow"));
+    await writeFile(path.join(tmp, "src/jobs/workflow.ts"), wf("StrayFlow"));
+
+    const found = await scanWorkflows(tmp);
+    expect(found.map((w) => w.className).sort()).toEqual(["CleanupFlow", "OrdersFlow"]);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("resolveMiddlewareChain boundary", () => {
+  test("a sibling folder sharing the root's name prefix is rejected", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-bound-"));
+    const root = path.join(tmp, "proj");
+    const sibling = path.join(tmp, "proj-evil", "agents", "x");
+    await mkdir(root, { recursive: true });
+    await mkdir(sibling, { recursive: true });
+    await expect(resolveMiddlewareChain(sibling, root)).rejects.toThrow(
+      /outside project root/,
+    );
+    rmSync(tmp, { recursive: true, force: true });
   });
 });

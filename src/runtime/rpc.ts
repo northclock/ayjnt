@@ -16,6 +16,10 @@
 
 import { getAgentByName } from "agents";
 
+/** Placement / routing options forwarded verbatim to the SDK's
+ *  getAgentByName (jurisdiction, locationHint, props, …). */
+export type GetAgentOptions = Parameters<typeof getAgentByName>[2];
+
 /**
  * Fetch a typed DurableObject stub for an agent instance by name. The
  * returned stub exposes every public method on T, plus .fetch() for raw
@@ -24,12 +28,16 @@ import { getAgentByName } from "agents";
  * @example
  *   const chat = await getAgent<ChatAgent>(this.env.CHAT_AGENT, userId);
  *   await chat.sendMessage("hello");
+ *
+ *   // pin to a jurisdiction:
+ *   const eu = await getAgent<ChatAgent>(ns, id, { jurisdiction: "eu" });
  */
 export async function getAgent<
   T extends Rpc.DurableObjectBranded | undefined,
 >(
   namespace: DurableObjectNamespace<T>,
   name: string,
+  options?: GetAgentOptions,
 ): Promise<DurableObjectStub<T>> {
   // The SDK's typing constrains T to extend Agent<Env>. We deliberately
   // loosen it to `Rpc.DurableObjectBranded` — the minimum shape the
@@ -39,5 +47,6 @@ export async function getAgent<
   return (await (getAgentByName as unknown as (
     ns: DurableObjectNamespace<T>,
     n: string,
-  ) => Promise<DurableObjectStub<T>>)(namespace, name));
+    o?: GetAgentOptions,
+  ) => Promise<DurableObjectStub<T>>)(namespace, name, options));
 }

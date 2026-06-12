@@ -3,9 +3,10 @@
 // override), computes the route path, DO binding, and middleware chain, and
 // returns a Manifest.
 //
-// Deliberately does NOT do full TS parsing — a line-based extractor is fast,
-// predictable, and keeps the framework dependency-light. If users need
-// anything exotic, an explicit `export const agentId = "..."` override works.
+// Deliberately does NOT do full TS parsing — a comment-aware, line-based
+// extractor is fast, predictable, and keeps the framework dependency-light.
+// If users need anything exotic, an explicit `export const agentId = "..."`
+// override works.
 
 import { Glob } from "bun";
 import * as path from "node:path";
@@ -19,6 +20,12 @@ import type {
 } from "../core/types.ts";
 
 export type { AgentEntry, CallableMethod, WorkflowEntry };
+
+/** Binding names the framework provisions itself (feature bindings and the
+ *  assets Fetcher). An agent or workflow class whose derived binding lands
+ *  on one of these would silently shadow the framework binding on `env`,
+ *  so we reject it at scan time with a rename instruction. */
+const RESERVED_BINDINGS = new Set(["BROWSER", "LOADER", "AI", "EMAIL", "ASSETS"]);
 
 /**
  * Scan the project for agents. Returns a Manifest with all discovered agents
@@ -62,6 +69,22 @@ export async function scan(root: string): Promise<Manifest> {
     }
 
     const folderPath = normalizeSlashes(path.dirname(rel));
+    if (folderPath === ".") {
+      throw new Error(
+        `${agentFile}: agent.ts must live in a subfolder of agents/ — ` +
+          `move it to agents/<route>/agent.ts so the folder name gives the agent its URL.`,
+      );
+    }
+    const routePath = folderToRoute(folderPath);
+    if (routePath === "/") {
+      throw new Error(
+        `${agentFile}: every segment of "${folderPath}" is a route group ` +
+          `(parens are stripped from the URL), so the agent would map to "/", ` +
+          `which ayjnt does not serve. Add a non-group folder segment, e.g. ` +
+          `agents/${folderPath}/chat/agent.ts.`,
+      );
+    }
+
     const agentFolder = path.dirname(agentFile);
     const appFile = path.join(agentFolder, "app.tsx");
     const docsFile = path.join(agentFolder, "docs.md");
@@ -74,7 +97,7 @@ export async function scan(root: string): Promise<Manifest> {
       className: parsed.className,
       baseClass: parsed.baseClass,
       folderPath,
-      routePath: folderToRoute(folderPath),
+      routePath,
       binding: classNameToBinding(parsed.className),
       sourceFile: agentFile,
       hasApp: existsSync(appFile),
@@ -107,41 +130,36 @@ export async function scan(root: string): Promise<Manifest> {
 }
 
 /**
- * Scan the project for workflow.ts files anywhere under the root
- * (excluding node_modules, .ayjnt, dist). Workflows can live next to
- * the agent that owns them (agents/<route>/workflow.ts) or at a
- * top-level shared location like workflows/<name>/workflow.ts —
- * either layout is recognised.
+ * Scan the project for workflow.ts files in the two locations the framework
+ * recognises: co-located with an agent (`agents/<route>/workflow.ts`) or
+ * under a top-level shared tree (`workflows/<name>/workflow.ts`).
+ *
+ * Deliberately NOT a whole-project glob — scanning from the root walked
+ * node_modules on every rebuild and crashed on symlinked dev setups
+ * (ENAMETOOLONG on self-referencing links).
  *
  * Exported for tests.
  */
 export async function scanWorkflows(root: string): Promise<WorkflowEntry[]> {
-  const glob = new Glob("**/workflow.ts");
   const entries: WorkflowEntry[] = [];
 
-  for await (const rel of glob.scan({
-    cwd: root,
-    onlyFiles: true,
-  })) {
-    // Skip vendor and codegen artifacts.
-    if (
-      rel.includes("node_modules/") ||
-      rel.includes(".ayjnt/") ||
-      rel.startsWith("dist/")
-    ) {
-      continue;
+  for (const base of ["agents", "workflows"]) {
+    const dir = path.join(root, base);
+    if (!existsSync(dir)) continue;
+    const glob = new Glob("**/workflow.ts");
+    for await (const rel of glob.scan({ cwd: dir, onlyFiles: true })) {
+      const file = path.join(dir, rel);
+      const source = await Bun.file(file).text();
+      const parsed = parseWorkflowSource(source);
+      if (!parsed) continue;
+      entries.push({
+        className: parsed.className,
+        baseClass: parsed.baseClass,
+        binding: classNameToBinding(parsed.className),
+        name: classNameToKebab(parsed.className),
+        sourceFile: file,
+      });
     }
-    const file = path.join(root, rel);
-    const source = await Bun.file(file).text();
-    const parsed = parseWorkflowSource(source);
-    if (!parsed) continue;
-    entries.push({
-      className: parsed.className,
-      baseClass: parsed.baseClass,
-      binding: classNameToBinding(parsed.className),
-      name: classNameToKebab(parsed.className),
-      sourceFile: file,
-    });
   }
 
   entries.sort((a, b) => a.className.localeCompare(b.className));
@@ -163,7 +181,9 @@ export function parseWorkflowSource(source: string): {
   className: string;
   baseClass: string;
 } | null {
-  const m = source.match(
+  // Strip comments first so a block-commented old class can't shadow the
+  // live declaration.
+  const m = stripComments(source).match(
     /^[ \t]*export\s+default\s+class\s+([A-Za-z_$][\w$]*)\s+extends\s+([A-Za-z_$][\w$]*)/m,
   );
   if (!m || !m[1] || !m[2]) return null;
@@ -187,6 +207,7 @@ function assertUniqueWorkflows(
   const seen = new Map<string, string>();
   for (const a of agents) seen.set(a.binding, `agent ${a.sourceFile}`);
   for (const w of workflows) {
+    assertNotReservedBinding(w.binding, w.className, `workflow ${w.sourceFile}`);
     const prior = seen.get(w.binding);
     if (prior) {
       throw new Error(
@@ -208,6 +229,98 @@ function emptyFeatures(): FeatureFlags {
   };
 }
 
+/**
+ * Blank out comments while preserving everything else — including string
+ * and template-literal CONTENTS, which the detectors below match against
+ * (import specifiers are strings!).
+ *
+ * A single linear pass tracking string/comment state, so comment markers
+ * inside strings (`"/* not a comment *​/"`) don't trigger stripping, and
+ * string-looking text inside comments doesn't leak through. Comments are
+ * replaced with spaces (newlines kept) so line/anchor-based regexes keep
+ * their positions.
+ *
+ * Known limitation: regex literals aren't tracked (telling `/` division
+ * from a regex start requires a real parser), so a regex containing `//`
+ * blanks the rest of that line. None of the framework's detection targets
+ * (imports, class declarations, method heads) can appear after a regex
+ * literal on the same line, so this is harmless in practice.
+ */
+export function stripComments(source: string): string {
+  let out = "";
+  let i = 0;
+  const n = source.length;
+  type Mode = "code" | "line" | "block" | "single" | "double" | "template";
+  let mode: Mode = "code";
+
+  while (i < n) {
+    const ch = source[i]!;
+    const next = source[i + 1];
+    switch (mode) {
+      case "code":
+        if (ch === "/" && next === "/") {
+          mode = "line";
+          out += "  ";
+          i += 2;
+        } else if (ch === "/" && next === "*") {
+          mode = "block";
+          out += "  ";
+          i += 2;
+        } else {
+          if (ch === "'") mode = "single";
+          else if (ch === '"') mode = "double";
+          else if (ch === "`") mode = "template";
+          out += ch;
+          i++;
+        }
+        break;
+      case "line":
+        if (ch === "\n") {
+          mode = "code";
+          out += ch;
+        } else {
+          out += " ";
+        }
+        i++;
+        break;
+      case "block":
+        if (ch === "*" && next === "/") {
+          mode = "code";
+          out += "  ";
+          i += 2;
+        } else {
+          out += ch === "\n" ? "\n" : " ";
+          i++;
+        }
+        break;
+      case "single":
+      case "double": {
+        if (ch === "\\") {
+          out += ch + (next ?? "");
+          i += 2;
+          break;
+        }
+        const quote = mode === "single" ? "'" : '"';
+        if (ch === quote || ch === "\n") mode = "code";
+        out += ch;
+        i++;
+        break;
+      }
+      case "template":
+        if (ch === "\\") {
+          out += ch + (next ?? "");
+          i += 2;
+          break;
+        }
+        if (ch === "`") mode = "code";
+        out += ch;
+        i++;
+        break;
+    }
+  }
+  return out;
+}
+
 /** True when the source imports anything from `@cloudflare/voice` (the
  *  package root or any subpath like `@cloudflare/voice/providers`).
  *  Used to flip the workspace `voice` feature flag — which provisions
@@ -218,11 +331,8 @@ function emptyFeatures(): FeatureFlags {
  *  providers used outside the `withVoice` mixin too (e.g. a multi-party
  *  conference room that runs Whisper per participant). */
 export function importsCloudflareVoice(source: string): boolean {
-  const stripped = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
   return /\bimport\b[^;\n]*?(["'])@cloudflare\/voice(?:\/[^"']*)?\1/.test(
-    stripped,
+    stripComments(source),
   );
 }
 
@@ -232,32 +342,23 @@ export function importsCloudflareVoice(source: string): boolean {
  *  imports (`import { withVoice as wv }`) are a documented limitation,
  *  same as `extends McpAgent` detection. */
 export function detectWithVoice(source: string): boolean {
-  // Strip comments so JSDoc examples don't trigger the flag.
-  const stripped = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
-  // Match `withVoice(` as a function call — covers both
+  // Comments are stripped so JSDoc examples don't trigger the flag.
+  // Matches `withVoice(` as a function call — covers both
   // `class Foo extends withVoice(Agent) { … }` and
   // `const V = withVoice(Agent); class Foo extends V { … }`.
-  return /\bwithVoice\s*\(/.test(stripped);
+  return /\bwithVoice\s*\(/.test(stripComments(source));
 }
 
 /** True when the source declares an `onEmail` method anywhere on the
  *  class body. Same line-based heuristic as `parseCallables` — we look
  *  for the method declaration shape, not a full TS parse. */
 export function detectOnEmail(source: string): boolean {
-  // Strip comments so an example or doc string mentioning `onEmail`
-  // doesn't trigger the flag.
-  const stripped = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
-  // Match a method declaration named `onEmail` with the usual TS
-  // modifiers. We require the opening `(` to differentiate from a
-  // class field or variable named the same. The `async`/`override`/
-  // modifier prefixes are optional in any order — we accept any
-  // subset.
+  // Comments are stripped so an example mentioning `onEmail` doesn't
+  // trigger the flag. We require the opening `(` to differentiate from
+  // a class field or variable named the same. The `async`/`override`/
+  // modifier prefixes are optional in any order — we accept any subset.
   return /(?:^|[};{])\s*(?:public\s+|private\s+|protected\s+|override\s+|async\s+|static\s+)*onEmail\s*\(/m.test(
-    stripped,
+    stripComments(source),
   );
 }
 
@@ -273,16 +374,11 @@ export function detectOnEmail(source: string): boolean {
  *  re-exports (`import { browserTools as bt } from "…"`) still match
  *  because we anchor on the module specifier, not the binding name. */
 export function importsAyjntBrowser(source: string): boolean {
-  // Strip block + line comments so `// import from "ayjnt/browser"`
-  // examples in JSDoc don't trigger the flag.
-  const stripped = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
   // `\bimport\b` requires an actual `import` keyword nearby; the
   // `[^;\n]*?` keeps the match within a single statement so a string
   // literal mentioning the path elsewhere (no preceding `import`)
-  // doesn't trigger. Non-greedy to fail fast on false matches.
-  return /\bimport\b[^;\n]*?(["'])ayjnt\/browser\1/.test(stripped);
+  // doesn't trigger.
+  return /\bimport\b[^;\n]*?(["'])ayjnt\/browser\1/.test(stripComments(source));
 }
 
 /**
@@ -297,6 +393,9 @@ export function importsAyjntBrowser(source: string): boolean {
  *   export const agentId = "chat_v1";
  *   export const agentId: string = "chat_v1";
  *
+ * Comments are stripped before matching, so a block-commented old class
+ * (or agentId) can't shadow the live one.
+ *
  * The base class is returned as-is from the source — we use "McpAgent" to
  * detect MCP agents at build time. If users alias imports (`import
  * { McpAgent as Mcp }`), detection won't trigger; that's a documented
@@ -307,21 +406,32 @@ export function parseAgentSource(source: string): {
   baseClass: string;
   agentId: string | null;
 } | null {
-  const classMatch = source.match(
+  const stripped = stripComments(source);
+
+  const classMatch = stripped.match(
     /^[ \t]*export\s+default\s+class\s+([A-Za-z_$][\w$]*)\s+extends\s+([A-Za-z_$][\w$]*)/m,
   );
   if (!classMatch || !classMatch[1] || !classMatch[2]) return null;
 
-  const idMatch = source.match(
-    /^[ \t]*export\s+const\s+agentId\s*(?::\s*string)?\s*=\s*["'`]([^"'`]+)["'`]/m,
+  // The quote is captured and back-referenced so the value may contain the
+  // OTHER quote characters ('it`s' is fine) and mismatched quotes don't
+  // silently truncate the id.
+  const idMatch = stripped.match(
+    /^[ \t]*export\s+const\s+agentId\s*(?::\s*string)?\s*=\s*(["'`])((?:(?!\1).)+)\1/m,
   );
 
   return {
     className: classMatch[1],
     baseClass: classMatch[2],
-    agentId: idMatch?.[1] ?? null,
+    agentId: idMatch?.[2] ?? null,
   };
 }
+
+// Matches a (possibly nested-one-level) parenthesized chunk without
+// backtracking blowup: the alternatives are disjoint on their first
+// character, so failure is linear. Used for decorator args and parameter
+// lists. Two-plus levels of nesting remain a documented limitation.
+const PAREN_CHUNK = "(?:[^()]|\\([^()]*\\))*";
 
 /**
  * Find every method on the agent class that should appear in
@@ -347,15 +457,6 @@ export function parseAgentSource(source: string): {
  *      WebSocket — e.g., a method other agents call via `getAgent<T>`
  *      that you still want advertised.
  *
- *      ```ts
- *      /**
- *       * Internal seed routine — listed in the catalog as a public
- *       * RPC method for agent-to-agent callers.
- *       * @callable
- *       *\/
- *      async seed(): Promise<void> { … }
- *      ```
- *
  * **Description precedence** when both markers are present (or when a
  * decorator has a plain JSDoc above it):
  *
@@ -364,21 +465,20 @@ export function parseAgentSource(source: string): {
  *      that immediately precedes the method or decorator
  *   3. `null`
  *
- * Long-form developer-facing JSDoc above a decorated method stays
- * available for editor hover regardless of which line ends up in the
- * catalog.
- *
  * Limitations (line-based, like everything else in scan.ts):
- *   - Parameter lists must fit on one line.
- *   - Return type may not span lines or contain top-level `{` (object
- *     literal types as the return annotation aren't supported).
+ *   - Parameter lists and decorator arguments may contain parens nested
+ *     at most ONE level deep (`cb: (x: number) => void` is fine;
+ *     `cb: (x: (y: number) => void) => void` is not). The same goes for
+ *     UNBALANCED parens inside string literals (`@callable({ description:
+ *     "see :)" })`) — the paren matcher doesn't track strings, so such a
+ *     method silently drops from the catalog. Use the JSDoc fallback or
+ *     balance the parens.
+ *   - Return type annotations may not contain top-level `{`, `=`, or
+ *     newlines (object-literal and arrow types as the return annotation
+ *     aren't supported — wrap them in a named type).
  *   - Decorator-detection is source-level: aliased imports
  *     (`import { callable as cb }; @cb(...)`) aren't followed. Keep
  *     the import plain.
- *   - Decorator args with nested parens (e.g. an arrow function inside
- *     the options object) confuse the non-greedy capture. Stick to
- *     simple object literals in the decorator argument, or use the
- *     JSDoc-tag fallback.
  */
 export function parseCallables(source: string): CallableMethod[] {
   // Method name → metadata. Methods discovered by both passes get merged
@@ -418,12 +518,15 @@ export function parseCallables(source: string): CallableMethod[] {
   const MODIFIERS =
     "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:override\\s+)?(?:async\\s+)?";
 
+  // Method head: name, params (one nesting level), optional return type.
+  const METHOD_HEAD = `${MODIFIERS}([A-Za-z_$][\\w$]*)\\s*\\((${PAREN_CHUNK})\\)(?:\\s*:\\s*([^{=;\\n]+?))?\\s*\\{`;
+
   // -- Pass 1: JSDoc-tagged methods -----------------------------------------
   // Anchors on `/** … @callable … */` immediately followed by a method
   // declaration. The `(?:(?!\*\/)[\s\S])*?` guard prevents the JSDoc body
   // capture from spanning across an earlier JSDoc's `*/`.
   const jsdocRe = new RegExp(
-    `\\/\\*\\*((?:(?!\\*\\/)[\\s\\S])*?@callable(?:(?!\\*\\/)[\\s\\S])*?)\\*\\/\\s*${MODIFIERS}([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)(?:\\s*:\\s*([^{=;\\n]+?))?\\s*\\{`,
+    `\\/\\*\\*((?:(?!\\*\\/)[\\s\\S])*?@callable(?:(?!\\*\\/)[\\s\\S])*?)\\*\\/\\s*${METHOD_HEAD}`,
     "g",
   );
   let m: RegExpExecArray | null;
@@ -441,22 +544,19 @@ export function parseCallables(source: string): CallableMethod[] {
   }
 
   // -- Pass 2: decorator-tagged methods -------------------------------------
-  // Anchors on `@callable(args)` or `@unstable_callable(args)`. The args
-  // capture is non-greedy `[\s\S]*?` — handles simple object literals,
-  // breaks on nested parens (documented limitation).
+  // Anchors on `@callable(args)` or `@unstable_callable(args)`. Args and
+  // any stacked decorators between the marker and the method use the
+  // bounded PAREN_CHUNK — an unmatched `@callable(` fails in linear time
+  // instead of backtracking exponentially across stacked decorators.
   //
   // An optional preceding JSDoc block is captured so a plain JSDoc above
   // a decorated method (no `@callable` tag in the comment) can still
   // supply the description as a fallback.
-  //
-  // Optional middle group allows other decorators stacked between
-  // `@callable(...)` and the method declaration.
   const decoratorRe = new RegExp(
     `(?:\\/\\*\\*((?:(?!\\*\\/)[\\s\\S])*?)\\*\\/\\s*)?` +
-      `@(?:callable|unstable_callable)\\s*\\(([\\s\\S]*?)\\)\\s*` +
-      `(?:@[A-Za-z_$][\\w$]*(?:\\s*\\([\\s\\S]*?\\))?\\s*)*` +
-      `${MODIFIERS}([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)` +
-      `(?:\\s*:\\s*([^{=;\\n]+?))?\\s*\\{`,
+      `@(?:callable|unstable_callable)\\s*\\((${PAREN_CHUNK})\\)\\s*` +
+      `(?:@[A-Za-z_$][\\w$]*(?:\\s*\\(${PAREN_CHUNK}\\))?\\s*)*` +
+      METHOD_HEAD,
     "g",
   );
   while ((m = decoratorRe.exec(source)) !== null) {
@@ -574,7 +674,10 @@ export function isMcpAgent(entry: { baseClass: string }): boolean {
  *   "(public)/chat"        → "chat"
  *
  * For rename-safety across folder moves, users should export an explicit
- * `agentId` from their agent.ts.
+ * `agentId` from their agent.ts. (Moving a folder WITHOUT one is still
+ * storage-safe as long as the class name is unchanged — the migration
+ * differ recognises the move — but pinning the id keeps the lockfile
+ * history tidy.)
  */
 export function defaultAgentId(folderPath: string): string {
   const parts = normalizeSlashes(folderPath)
@@ -596,7 +699,11 @@ export async function resolveMiddlewareChain(
   const absRoot = path.resolve(root);
   const absFolder = path.resolve(agentFolder);
 
-  if (!absFolder.startsWith(absRoot)) {
+  // path.relative-based containment: a bare startsWith would accept
+  // sibling folders that share a name prefix (root "/a/b" matching
+  // "/a/bc") and walk middleware from outside the project.
+  const rel = path.relative(absRoot, absFolder);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error(
       `agent folder ${agentFolder} is outside project root ${root}`,
     );
@@ -629,6 +736,20 @@ function isRouteGroup(segment: string): boolean {
   return /^\(.+\)$/.test(segment);
 }
 
+function assertNotReservedBinding(
+  binding: string,
+  className: string,
+  where: string,
+): void {
+  if (RESERVED_BINDINGS.has(binding)) {
+    throw new Error(
+      `Class "${className}" (${where}) derives the binding name "${binding}", ` +
+        `which ayjnt reserves for a framework binding ` +
+        `(${[...RESERVED_BINDINGS].join(", ")} are reserved). Rename the class.`,
+    );
+  }
+}
+
 function assertUnique(entries: AgentEntry[]): void {
   const seen = new Map<string, { kind: string; entry: AgentEntry }>();
   const check = (
@@ -649,6 +770,7 @@ function assertUnique(entries: AgentEntry[]): void {
   };
 
   for (const entry of entries) {
+    assertNotReservedBinding(entry.binding, entry.className, `agent ${entry.sourceFile}`);
     check("routePath", entry.routePath, entry);
     check("binding", entry.binding, entry);
     check("agentId", entry.agentId, entry);

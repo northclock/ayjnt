@@ -8,31 +8,48 @@
 // override that prefix through the options object — but we can supply
 // a custom `VoiceTransport` to the hook, and that's what we do.
 //
-// `AyjntVoiceTransport` is a thin WebSocket wrapper that connects to a
-// URL we control. The codegen-generated `useVoiceAgent` hook
+// `AyjntVoiceTransport` is a reconnecting WebSocket wrapper that connects
+// to a URL we control. The codegen-generated `useVoiceAgent` hook
 // (`.ayjnt/client/<route>/index.tsx`) calls into here with the route
 // pre-bound, so the user just writes `useVoiceAgent({ name: "..." })`
 // and the URL is right by construction.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useVoiceAgent as upstreamUseVoiceAgent } from "@cloudflare/voice/react";
 
+/** Reconnect backoff: 1s, 2s, 4s, … capped at 10s, retrying indefinitely.
+ *  No attempt limit on purpose: the upstream VoiceClient never re-calls
+ *  connect() itself and its UI says "Reconnecting…" — a transport that
+ *  gives up turns that into a permanent lie after one long outage (a
+ *  locked phone is enough). The attempt counter resets only after a
+ *  connection PROVES stable (open for {@link RECONNECT_STABLE_MS}), so a
+ *  flapping server that accepts-then-drops keeps backing off to the cap
+ *  instead of being re-dialed every second. */
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 10_000;
+const RECONNECT_STABLE_MS = 5_000;
+/** Exponent clamp so 2**attempts can't overflow during long outages. */
+const RECONNECT_MAX_EXPONENT = 4;
+
 /**
- * Internal WebSocket-backed voice transport that connects to ayjnt's
- * URL shape. Implements every method of `VoiceTransport` (5 methods +
- * 4 event handlers + `connected` getter); no external dependencies
- * beyond the browser's `WebSocket` global.
+ * WebSocket-backed voice transport that connects to ayjnt's URL shape.
+ * Structurally compatible with `VoiceTransport` from
+ * `@cloudflare/voice/react` (5 methods + 4 event handlers + a `connected`
+ * getter) — the nominal `implements` clause is omitted on purpose so the
+ * published d.ts doesn't drag in the upstream's relative-path type
+ * imports (bunup's d.ts bundler can't rewrite those).
+ *
+ * Like the SDK's default PartySocket transport, this one RECONNECTS:
+ * `@cloudflare/voice`'s VoiceClient surfaces "Connection lost.
+ * Reconnecting..." on error and then waits for the transport to come
+ * back — it never calls connect() again itself. A transport without
+ * reconnection turns one network blip into a permanently dead session
+ * behind a UI that promises recovery. Backoff is exponential and capped
+ * (see constants above); an intentional `disconnect()` cancels it.
  *
  * Exported so users who need to wire up `<VoiceClient>` manually (no
- * React) can reuse it. Most users get this via the generated
- * `useVoiceAgent` hook and never touch the transport directly.
+ * React) can reuse it.
  */
-// Structurally compatible with `VoiceTransport` from
-// `@cloudflare/voice/react` — TypeScript's nominal `implements` clause
-// is omitted on purpose so the published d.ts doesn't drag in the
-// upstream's relative-path type imports (bunup's d.ts bundler can't
-// rewrite those). User code can still pass an instance anywhere a
-// `VoiceTransport` is expected; structural typing covers it.
 export class AyjntVoiceTransport {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
@@ -41,6 +58,10 @@ export class AyjntVoiceTransport {
 
   private socket: WebSocket | null = null;
   private url: string;
+  private closedByUser = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: {
     /** WebSocket URL — e.g. `wss://host/voice-chat/room-42`. */
@@ -68,19 +89,88 @@ export class AyjntVoiceTransport {
   }
 
   connect(): void {
-    if (this.socket) return;
-    const socket = new WebSocket(this.url);
-    socket.binaryType = "arraybuffer";
-    socket.onopen = () => this.onopen?.();
-    socket.onclose = () => this.onclose?.();
-    socket.onerror = (event) => this.onerror?.(event);
-    socket.onmessage = (event) => this.onmessage?.(event.data);
-    this.socket = socket;
+    this.closedByUser = false;
+    // Only a live (or in-flight) socket makes connect() a no-op. The old
+    // check was `if (this.socket) return`, which left the transport
+    // permanently dead after any server-side close: the CLOSED socket
+    // stayed referenced and every reconnect attempt silently did nothing.
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    this.clearReconnectTimer();
+    this.reconnectAttempts = 0;
+    this.openSocket();
   }
 
   disconnect(): void {
+    this.closedByUser = true;
+    // Cancel any armed reconnect — without this, a timer scheduled before
+    // disconnect() would zombie-reopen the socket afterwards.
+    this.clearReconnectTimer();
     this.socket?.close();
-    this.socket = null;
+    // `this.socket` is cleared by the socket's own (identity-checked)
+    // onclose handler, which also fires the public onclose callback —
+    // same observable behavior an un-wrapped WebSocket would have.
+  }
+
+  private openSocket(): void {
+    const socket = new WebSocket(this.url);
+    socket.binaryType = "arraybuffer";
+    // Every handler checks identity: a slow close/error event from a
+    // socket we already replaced must not clobber the live one's state
+    // or schedule a spurious reconnect.
+    socket.onopen = () => {
+      if (this.socket !== socket) return;
+      // Reset the backoff only once the connection has held for a while —
+      // resetting on open lets an accept-then-drop server pull us back to
+      // 1s dials forever.
+      this.stableTimer = setTimeout(() => {
+        this.stableTimer = null;
+        this.reconnectAttempts = 0;
+      }, RECONNECT_STABLE_MS);
+      this.onopen?.();
+    };
+    socket.onclose = () => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      if (this.stableTimer !== null) {
+        clearTimeout(this.stableTimer);
+        this.stableTimer = null;
+      }
+      this.onclose?.();
+      if (!this.closedByUser) this.scheduleReconnect();
+    };
+    socket.onerror = (event) => {
+      if (this.socket !== socket) return;
+      this.onerror?.(event);
+    };
+    socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
+      this.onmessage?.(event.data);
+    };
+    this.socket = socket;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null) return;
+    const exponent = Math.min(this.reconnectAttempts, RECONNECT_MAX_EXPONENT);
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** exponent, RECONNECT_MAX_MS);
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.closedByUser) this.openSocket();
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 }
 
@@ -118,9 +208,10 @@ export type UseAyjntVoiceAgentOptions = {
  * wrapper at `.ayjnt/client/<route>/index.tsx`; user code calls the
  * generated `useVoiceAgent()` without explicit URL knowledge.
  *
- * Behaviourally identical to `useVoiceAgent` from
- * `@cloudflare/voice/react` — same return shape, same options minus
- * `transport`.
+ * Matches `useVoiceAgent` from `@cloudflare/voice/react` — same return
+ * shape, same options minus `transport`. (One deliberate difference:
+ * the reconnect backoff lives in {@link AyjntVoiceTransport} rather
+ * than PartySocket.)
  */
 // Return type uses ReturnType<typeof upstreamUseVoiceAgent> rather than
 // re-exporting `UseVoiceAgentReturn` directly. That route resolves the
@@ -134,9 +225,6 @@ export function useAyjntVoiceAgent(
   const { routePath, name, host, query, enabled, ...rest } = options;
   const instanceName = name ?? deriveInstance(routePath);
 
-  // Construct the URL once per (host, routePath, instanceName) tuple
-  // so the transport identity stays stable across renders. Recreating
-  // it on every render churns the WebSocket.
   const transport = useTransport({
     routePath,
     instanceName,
@@ -155,9 +243,22 @@ export function useAyjntVoiceAgent(
   });
 }
 
-/** Construct a transport that survives across renders for the same
- *  destination URL. Disconnects + recreates when any URL component
- *  changes. */
+/**
+ * One transport per destination URL, created DURING render (useMemo).
+ *
+ * Timing matters here. The upstream hook's connect/disconnect effect is
+ * keyed on its own option string (agent/name/host/query…), NOT on the
+ * transport object. When the instance name changes, that effect re-runs
+ * in the same commit and reconnects whatever transport it sees. The old
+ * implementation swapped the transport in a `useEffect` — one commit too
+ * late — so the upstream effect reconnected the STALE transport to the
+ * old URL and the new one never connected. Creating the transport in
+ * render means the same commit that changes the name delivers the
+ * matching transport.
+ *
+ * A memo value discarded by React holds no resources — the constructor
+ * opens nothing; only connect() does (called by the upstream client).
+ */
 function useTransport(opts: {
   routePath: string;
   instanceName: string;
@@ -173,34 +274,43 @@ function useTransport(opts: {
         ? "wss:"
         : "ws:";
     const prefix = opts.routePath.replace(/^\//, "");
-    return `${baseProto}//${baseHost}/${prefix}/${opts.instanceName}`;
+    // Encoded so a derived (decoded) instance name containing "/", "?" or
+    // "#" can't be re-parsed as URL structure — mirrors the generated
+    // useAgent hook's basePath construction.
+    return `${baseProto}//${baseHost}/${prefix}/${encodeURIComponent(opts.instanceName)}`;
   }, [opts.host, opts.routePath, opts.instanceName]);
 
-  // Re-create the transport when the URL changes. The voice hook
-  // owns connect/disconnect — we just hand it an instance.
-  const [transport, setTransport] = useState(
+  const queryKey = JSON.stringify(opts.query ?? null);
+  return useMemo(
     () => new AyjntVoiceTransport({ url, query: opts.query }),
-  );
-  useEffect(() => {
-    setTransport(new AyjntVoiceTransport({ url, query: opts.query }));
-    // The replaced transport is connected by the upstream hook in a
-    // separate effect; the old one is disconnected when the hook tears
-    // it down. No explicit cleanup needed here.
+    // query participates via its serialized form so callers can pass a
+    // fresh object literal every render without churning the transport.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, JSON.stringify(opts.query)]);
-  return transport;
+    [url, queryKey],
+  );
 }
 
 /** Pull the instance name out of `window.location.pathname`, mirroring
- *  the `useAgent` hook's behaviour. `/voice-chat` → `"default"`,
- *  `/voice-chat/room-42` → `"room-42"`. */
+ *  the generated `useAgent` hook (and the worker's matcher): segments
+ *  are percent-decoded and compared segment-wise.
+ *  `/voice-chat` → `"default"`, `/voice-chat/room-42` → `"room-42"`. */
 function deriveInstance(routePath: string): string {
   if (typeof window === "undefined") return "default";
-  const p = window.location.pathname;
-  if (p !== routePath && !p.startsWith(routePath + "/")) return "default";
-  const remainder = p.slice(routePath.length);
-  const parts = remainder.split("/").filter(Boolean);
-  return parts[0] ?? "default";
+  const prefix = routePath.split("/").filter(Boolean);
+  const segments = window.location.pathname
+    .split("/")
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    });
+  for (let i = 0; i < prefix.length; i++) {
+    if (segments[i] !== prefix[i]) return "default";
+  }
+  return segments[prefix.length] ?? "default";
 }
 
 /** Append query params to a URL. Returns the URL unchanged when the

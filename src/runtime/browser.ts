@@ -46,12 +46,11 @@ import {
 } from "agents/browser/ai";
 
 /**
- * Loose agent shape we read bindings off of. We only require `server`
- * is unset (so this isn't accidentally typed-narrowed to an `McpAgent`).
- * The actual `env` field is `protected` on Cloudflare's `Agent` base
- * class, so we cast through {@link AgentWithEnv} internally rather than
- * exposing it on this public interface — that keeps `browserTools(this)`
- * ergonomic at call sites.
+ * Loose agent shape we read bindings off of. Deliberately just `object`:
+ * the `env` field we need is `protected` on Cloudflare's `Agent` base
+ * class, so any structural requirement here would force users to cast at
+ * the call site. We cast through {@link AgentWithEnv} internally instead —
+ * that keeps `browserTools(this)` ergonomic.
  */
 export type BrowserAgentLike = object;
 
@@ -109,6 +108,17 @@ export function browserTools(
         `Worker Loader binding automatically when any agent imports ` +
         `from "ayjnt/browser" — make sure you've run \`bun run dev\` ` +
         `or \`ayjnt build\` so wrangler.jsonc is regenerated.`,
+    );
+  }
+  // Fail here, at construction, rather than inside the first tool
+  // execution — a missing browser endpoint surfaces there as an opaque
+  // fetch failure long after the mistake was made.
+  if (!env.BROWSER && !options?.cdpUrl) {
+    throw new Error(
+      `browserTools: env.BROWSER is not bound and no cdpUrl override was ` +
+        `given. Run \`ayjnt build\` to regenerate wrangler.jsonc with the ` +
+        `Browser Rendering binding, or pass { cdpUrl: "http://localhost:9222" } ` +
+        `to use a local Chromium in dev.`,
     );
   }
   return upstreamCreateBrowserTools({

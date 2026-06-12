@@ -12,7 +12,7 @@
 // a templates/ directory on npm (and worry about file path resolution
 // inside the published package).
 
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,32 +35,79 @@ Next steps after scaffolding:
 
 type Template = "blank" | "with-ui";
 
-export async function newCmd(argv: string[]): Promise<void> {
+export type NewArgs =
+  | { kind: "help" }
+  | { kind: "error"; message: string }
+  | { kind: "scaffold"; targetDir: string; template: Template };
+
+/**
+ * Validate `ayjnt new` arguments. Pure — exported for tests; newCmd owns
+ * the printing/exit. A typo'd flag (--with-iu) silently scaffolding the
+ * wrong template is worse than an error; same for a stray positional.
+ */
+export function validateNewArgs(argv: string[]): NewArgs {
   if (argv.length === 0 || argv.includes("-h") || argv.includes("--help")) {
+    return { kind: "help" };
+  }
+  const unknownFlags = argv.filter(
+    (a) => a.startsWith("-") && a !== "--with-ui",
+  );
+  if (unknownFlags.length > 0) {
+    return { kind: "error", message: `unknown option ${unknownFlags[0]}` };
+  }
+  const positional = argv.filter((a) => !a.startsWith("-"));
+  if (positional.length > 1) {
+    return {
+      kind: "error",
+      message: `expected one <directory>, got: ${positional.join(", ")}`,
+    };
+  }
+  if (!positional[0]) {
+    return { kind: "error", message: "missing <directory>" };
+  }
+  return {
+    kind: "scaffold",
+    targetDir: positional[0],
+    template: argv.includes("--with-ui") ? "with-ui" : "blank",
+  };
+}
+
+/**
+ * Check the resolved target path is scaffoldable. An existing EMPTY
+ * directory is fine — `mkdir my-app && cd my-app && ayjnt new .` is a
+ * natural flow; we only refuse when there's content we could clobber.
+ * Returns an error message, or null when the target is usable.
+ */
+export function validateTargetDir(target: string): string | null {
+  if (!existsSync(target)) return null;
+  if (!statSync(target).isDirectory()) {
+    return `${target} exists and is not a directory.`;
+  }
+  if (readdirSync(target).some((f) => f !== ".DS_Store")) {
+    return `${target} is not empty — pick a new directory or empty it first.`;
+  }
+  return null;
+}
+
+export async function newCmd(argv: string[]): Promise<void> {
+  const parsed = validateNewArgs(argv);
+  if (parsed.kind === "help") {
     console.log(USAGE);
     return;
   }
-
-  const withUi = argv.includes("--with-ui");
-  const positional = argv.filter(
-    (a) => !a.startsWith("--") && !a.startsWith("-"),
-  );
-  const targetDir = positional[0];
-
-  if (!targetDir) {
-    console.error("error: missing <directory>\n");
+  if (parsed.kind === "error") {
+    console.error(`error: ${parsed.message}\n`);
     console.error(USAGE);
     process.exit(1);
   }
+  const { targetDir, template } = parsed;
 
   const target = path.resolve(targetDir);
-  if (existsSync(target)) {
-    throw new Error(
-      `${targetDir} already exists — pick a new directory or remove the existing one.`,
-    );
+  const targetProblem = validateTargetDir(target);
+  if (targetProblem) {
+    throw new Error(targetProblem);
   }
 
-  const template: Template = withUi ? "with-ui" : "blank";
   const projectName = sanitizePackageName(path.basename(target));
 
   await scaffold(target, projectName, template);
@@ -124,14 +171,15 @@ async function scaffold(
 }
 
 /**
- * Find `.claude/skills/` relative to the published CLI bin and copy it
- * into the new project. The CLI lives at `<package-root>/dist/ayjnt.js`
- * (production) or `<package-root>/bin/ayjnt.ts` (dev), so the skills
- * directory is consistently at `<package-root>/.claude/skills/`.
+ * Find `.claude/skills/` relative to this module and copy it into the new
+ * project. The compiled CLI lives at `<package-root>/dist/ayjnt.js` (one
+ * level below the root, hence the first candidate), while in framework
+ * dev this module runs from `<package-root>/src/cli/new.ts` (two levels
+ * below, hence the second).
  */
 function copySkills(target: string): void {
   // `import.meta.url` works in both Bun's direct .ts execution and the
-  // bundled .js artifact. From either, ../ gets us to the package root.
+  // bundled .js artifact.
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
     path.resolve(cliDir, "..", ".claude", "skills"),
@@ -283,22 +331,22 @@ Drop an \`app.tsx\` next to \`agent.ts\`:
 
 \`\`\`tsx
 // agents/alive/app.tsx
-import { createRoot } from "react-dom/client";
 import { useAgent } from "@ayjnt/alive";
 
-function App() {
+export default function App() {
   const agent = useAgent();
   return <div>agent {agent.name}: {JSON.stringify(agent.state)}</div>;
 }
-
-createRoot(document.getElementById("root")!).render(<App />);
 \`\`\`
+
+Export the component as the default — the framework generates the mount
+(createRoot, StrictMode, an error boundary) for you.
 
 Add \`react\`, \`react-dom\`, and their types to \`package.json\`, run \`bun install\`, then \`bun run dev\`. Visit http://localhost:8787/alive/hello in a browser.
 `;
   return `# ${name}
 
-An ayjnt project. [Docs](https://github.com/anthropic-experimental/ayjnt).
+An ayjnt project. [Docs](https://github.com/northclock/ayjnt).
 
 ## Run it
 
@@ -374,10 +422,13 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 }
 
 function counterApp(): string {
-  return `import { createRoot } from "react-dom/client";
-import { useAgent } from "@ayjnt/counter";
+  // Export-default convention: the framework generates the mount wrapper
+  // (createRoot + StrictMode + error boundary). Scaffolding the legacy
+  // manual-mount pattern here would greet new users with a deprecation
+  // warning on their very first `bun run dev`.
+  return `import { useAgent } from "@ayjnt/counter";
 
-function Counter() {
+export default function Counter() {
   const agent = useAgent();
   const count = agent.state?.count ?? 0;
   const set = (next: number) => agent.setState({ count: next });
@@ -408,8 +459,5 @@ const styles = {
   buttons: { display: "flex", gap: 12, justifyContent: "center" },
   button: { padding: "10px 20px", fontSize: 18, borderRadius: 6, border: "1px solid #ccc", background: "#f7f7f7", cursor: "pointer" },
 };
-
-const root = document.getElementById("root");
-if (root) createRoot(root).render(<Counter />);
 `;
 }

@@ -190,6 +190,23 @@ After that, class renames become storage-preserving rename migrations.
 revert and pin `agentId` before re-running build. If it's already
 in prod, the data is gone — restore from backup if you have one.
 
+Note: a plain FOLDER rename (class name unchanged) is safe even
+without a pinned `agentId` — the migration differ recognises it as a
+move and preserves storage. A simultaneous folder + class rename is
+the case that needs the pinned id.
+
+## "Upgraded ayjnt and an instance with a non-ASCII / space / encoded name lost its state"
+
+**Cause.** Since the routing rework, the worker percent-DECODES URL
+segments before resolving the Durable Object instance: `/chat/caf%C3%A9`
+now addresses the DO named `café`. Older versions used the raw segment,
+so the same URL used to address a DO literally named `caf%C3%A9` —
+a different object. Plain-ASCII instance names are unaffected.
+
+**Fix.** Reach the old object by its raw (encoded) name explicitly —
+`useAgent({ name: "caf%C3%A9" })` or double-encode the URL segment
+(`/chat/caf%25C3%25A9`) — and migrate its state to the new name once.
+
 ## When in doubt
 
 ```sh

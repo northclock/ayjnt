@@ -4,8 +4,10 @@
 // Inputs:
 //   - manifest: drives durable_objects.bindings (name from binding, class_name
 //     from className)
-//   - lockfile: drives migrations (verbatim). Callers pass the lockfile AFTER
-//     applying any diff, so any pending migration is already baked in.
+//   - lockfile: drives migrations, projected onto the fields wrangler's
+//     schema knows (the lockfile-only `timestamp` stays out — wrangler warns
+//     on unknown migration fields). Callers pass the lockfile AFTER applying
+//     any diff, so any pending migration is already baked in.
 //   - options: project name (from package.json, sanitized), compatibility
 //     date, optional user overrides.
 
@@ -76,7 +78,10 @@ export function generateWrangler(
 
   const config: Record<string, unknown> = {
     ...extras,
-    $schema: "node_modules/wrangler/config-schema.json",
+    // The generated file lives at .ayjnt/dist/wrangler.jsonc, two levels
+    // below the project root where node_modules sits — without the ../..
+    // editors silently never load the schema.
+    $schema: "../../node_modules/wrangler/config-schema.json",
     name,
     main: "./entry.ts",
     compatibility_date: compatibilityDate,
@@ -87,7 +92,19 @@ export function generateWrangler(
         class_name: a.className,
       })),
     },
-    migrations: lockfile.migrations.map(stripUndefined),
+    // Project each entry onto the fields wrangler's migration schema
+    // declares. The lockfile-only `timestamp` would trigger an "Unexpected
+    // fields found in migrations" warning plus a bogus "try upgrading
+    // wrangler" hint on every wrangler command.
+    migrations: lockfile.migrations.map(
+      ({ tag, new_sqlite_classes, renamed_classes, deleted_classes }) =>
+        stripUndefined({
+          tag,
+          new_sqlite_classes,
+          renamed_classes,
+          deleted_classes,
+        }),
+    ),
   };
 
   // Workflows — emitted only when at least one workflow.ts was discovered.
@@ -130,9 +147,9 @@ export function generateWrangler(
 
   // Browser tools opt-in. Any agent importing from `"ayjnt/browser"`
   // flips `manifest.features.browser`; we mirror that into the three
-  // bindings Cloudflare's `createBrowserTools` requires plus the
-  // `nodejs_compat` flag. The flag is added to the existing set so
-  // any user-supplied compatibility flags are preserved.
+  // bindings Cloudflare's `createBrowserTools` requires. The
+  // `nodejs_compat` flag the tools need is guaranteed by construction —
+  // `flags` is built from `new Set(["nodejs_compat", ...])` above.
   if (manifest.features.browser) {
     config["browser"] = { binding: "BROWSER" };
     config["worker_loaders"] = [{ binding: "LOADER" }];
@@ -140,13 +157,6 @@ export function generateWrangler(
     // declared it). Don't clobber a user-set value.
     if (config["ai"] === undefined) {
       config["ai"] = { binding: "AI" };
-    }
-    // Spread into a fresh set so we don't mutate `flags` after it's
-    // been written to the config above.
-    if (!flags.includes("nodejs_compat")) {
-      // Unreachable — `flags` always starts with `nodejs_compat` — but
-      // keep the guard for paranoia in case the default changes.
-      flags.push("nodejs_compat");
     }
   }
 

@@ -50,14 +50,24 @@ The output of scanning. Agents are sorted alphabetically by `routePath` for stab
 
 Committed to git. Two things matter:
 
-- **`migrations: MigrationEntry[]`** — append-only. Shape matches wrangler's migration format (`new_sqlite_classes`, `renamed_classes`, `deleted_classes`, plus `tag` and `timestamp`). Entries are applied in order by wrangler.
+- **`migrations: MigrationEntry[]`** — append-only. Each entry carries wrangler's migration fields (`new_sqlite_classes`, `renamed_classes`, `deleted_classes`, `tag`) plus a lockfile-only `timestamp` for auditing. `generateWrangler` projects entries onto the wrangler-known fields — `timestamp` never reaches wrangler.jsonc (wrangler warns on unknown migration fields).
 - **`classes: Record<agentId, {className, firstTag}>`** — the *derived* end-state after all migrations apply. Used to detect renames: if the same `agentId` reappears in a new manifest with a different `className`, it's a rename, not a delete + add.
 
 If you change past entries, wrangler will refuse to migrate. Don't.
 
 ### `MigrationDiff`
 
-What `diffMigrations` returns. `nextEntry` is `null` exactly when nothing changed — callers use this as the "no-op build" signal.
+What `diffMigrations` returns. Identity resolution, in order:
+
+- same `agentId`, different `className` → **rename** (`renamed_classes`, storage preserved)
+- different `agentId`, same `className` → **move** (a folder rename shifted the derived agentId; DO storage is keyed by class name, so no migration is emitted — only the lockfile key changes). Without this rule a plain folder rename emitted delete+create of the same class, which wrangler executes as "destroy all storage".
+- otherwise added / deleted as expected.
+
+`nextEntry` is `null` when no wrangler migration is needed; `diffChangesLockfile(diff)` is the "does anything need writing" signal (moves change the lockfile without a migration entry).
+
+### Breaking change: instance ids are percent-decoded
+
+The worker's route matcher (now in `src/runtime/router.ts`) percent-decodes URL segments before resolving the DO instance, and the generated `useAgent` hook mirrors it (deriving the decoded name, re-encoding it into `basePath`). `/chat/caf%C3%A9` therefore addresses the DO named `café`. Deployments created before this change addressed the raw segment (`caf%C3%A9`) — instances whose names contain non-ASCII, spaces, or other encoded characters must be reached by their raw name once (`useAgent({ name: "caf%C3%A9" })`) to migrate state. ASCII-only names are unaffected. See the `ayjnt-troubleshoot` skill for the user-facing symptom.
 
 ## Rename detection: why agentId matters
 

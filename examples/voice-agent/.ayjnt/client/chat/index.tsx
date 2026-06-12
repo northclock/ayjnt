@@ -6,7 +6,6 @@
 // custom voice transport (URL: /<route>/<instance>) rather than the
 // SDK's default `/agents/<kebab>/<name>` path.
 import { AyjntVoiceTransport, useAyjntVoiceAgent } from "ayjnt/voice/client";
-import type ChatVoice from "../../../agents/chat/agent.ts";
 
 /** The agent class, re-exported so callers can `import type { ChatVoice } from "@ayjnt/...".` */
 export type { default as ChatVoice } from "../../../agents/chat/agent.ts";

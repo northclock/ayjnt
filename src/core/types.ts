@@ -2,9 +2,12 @@
 // between stages (scan → manifest → migration diff → wrangler/entry emission).
 
 /**
- * One method on an agent class flagged with the `@callable` JSDoc tag.
- * Surfaces in the catalog so other agents and external tooling can discover
- * the public RPC surface (name, parameter signature, return type, blurb).
+ * One method on an agent class marked callable — primarily via Cloudflare's
+ * `@callable()` decorator from `"agents"` (which also exposes the method to
+ * browser clients), with the legacy `/** @callable *​/` JSDoc tag as a
+ * catalog-only fallback. Surfaces in `/__ayjnt/catalog` so other agents and
+ * external tooling can discover the public RPC surface (name, parameter
+ * signature, return type, blurb).
  *
  * Parsed source-level — see `parseCallables` in src/codegen/scan.ts for
  * limitations.
@@ -162,6 +165,12 @@ export type MigrationDiff = {
   renamed: { from: string; to: string; agentId: string }[];
   /** agentIds that were in the lockfile but aren't in the current manifest. */
   deleted: { agentId: string; className: string }[];
+  /** Folder moves: the agentId changed but the className didn't. DO storage
+   *  is keyed by class name, so no wrangler migration is needed — only the
+   *  lockfile's bookkeeping key moves. Without this, a folder rename would
+   *  emit delete+create of the same class and destroy all production
+   *  storage. */
+  moved: { fromAgentId: string; toAgentId: string; className: string }[];
   /** If non-empty, the next migration entry. null if no changes. */
   nextEntry: MigrationEntry | null;
 };

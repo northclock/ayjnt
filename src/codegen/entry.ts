@@ -2,20 +2,21 @@
 // the user's runtime runs on. We bypass routeAgentRequest and own the dispatch
 // so URL shape stays under our control and nested routing / route groups work.
 //
+// The generated file is deliberately THIN: a route table, a class map, and a
+// fetch handler that delegates to "ayjnt/router" (matchRoute, buildCatalog,
+// isHtmlRequest, compose). All routing logic lives in src/runtime/router.ts
+// where it is unit-tested — template strings can't be.
+//
 // Generated file:
-//   - re-exports every agent class (required so DO can register them by name)
-//     and also keeps a local reference to each class so MCP dispatch can call
-//     `ClassName.serve(path, { binding }).fetch(...)`
-//   - imports every unique middleware.ts file once
-//   - builds a route table sorted longest-prefix first, with each route
-//     carrying its own ordered middleware chain, optional `assetFlat` (for
-//     agents with app.tsx), and an `isMcp` flag
-//   - exports a default { fetch } that matches the route, runs the chain
-//     via `compose`, then dispatches to:
-//       1. McpAgent.serve(...).fetch(...)       if the agent is an MCP agent
-//       2. env.ASSETS.fetch(<route>/index.html) if HTML is wanted and the
-//                                               agent has an app.tsx
-//       3. stub.fetch(...) via getAgentByName   in every other case
+//   - imports every agent class under a synthetic `__ayjnt_agent_<N>` name
+//     and re-exports it under its real class name. The alias means user
+//     class names can never collide with the entry's own identifiers (or
+//     shadow globals like Response/URL); the re-export is what registers
+//     the class with the DO runtime at the module boundary, and wrangler
+//     resolves `class_name` against the EXPORT name, so registration works.
+//   - imports every unique middleware.ts once as `__ayjnt_mw_<N>`
+//   - builds a route table sorted longest-prefix first
+//   - exports a default { fetch } (and an email handler when enabled)
 //
 // Why env.ASSETS instead of inlining HTML + JS strings:
 //   Inlining a bundled ES module inside a <script type="module">…</script>
@@ -36,7 +37,7 @@
 //   message to the client is wrong. See docs/README for client details.
 
 import * as path from "node:path";
-import type { Manifest } from "../core/types.ts";
+import type { AgentEntry, Manifest } from "../core/types.ts";
 import { classNameToKebab, isMcpAgent } from "./scan.ts";
 
 export type EntryOptions = {
@@ -59,18 +60,25 @@ export function generateEntry(
 ): string {
   const outDir = path.dirname(path.resolve(options.outPath));
   const agents = manifest.agents;
+  const workflows = manifest.workflows;
   const assetRoutes = options.assetRoutes ?? {};
   const docsByBinding = options.docs ?? {};
   const hasApps = Object.keys(assetRoutes).length > 0;
   const emailEnabled = manifest.features.email;
   const emailResolverFile = manifest.features.emailResolverFile;
-  // Email handlers route by the local part of the `to` address — see
-  // the email block lower in the generated entry for the resolver logic.
-  // The map below is built only for agents that implement onEmail.
-  const emailRoutes = agents.filter((a) => a.hasOnEmail);
+
+  // Synthetic local names. User class names appear ONLY as export aliases
+  // and string literals, so they can never collide with the identifiers
+  // this file declares or with globals the dispatch code relies on.
+  const agentLocal = new Map<AgentEntry, string>(
+    agents.map((a, i) => [a, `__ayjnt_agent_${i}`]),
+  );
+  const workflowLocal = new Map(
+    workflows.map((w, i) => [w, `__ayjnt_workflow_${i}`]),
+  );
 
   // Collect unique middleware files across all agents, preserving first-seen
-  // order. Each gets a stable `mw_<N>` import name.
+  // order. Each gets a stable `__ayjnt_mw_<N>` import name.
   const middlewareIndex = new Map<string, number>();
   for (const a of agents) {
     for (const mw of a.middlewareChain) {
@@ -84,50 +92,31 @@ export function generateEntry(
     (a, b) => b.routePath.length - a.routePath.length,
   );
 
-  // Two-pronged import: we both need the class identity (for static method
-  // calls like McpAgent.serve()) AND a re-export (so the DO runtime can
-  // register the class by name at the module boundary). `import X` gives
-  // us the local binding; `export { X }` hoists it into the module's exports.
   const agentImports = agents
-    .map((a) => {
-      const rel = toImportSpec(outDir, a.sourceFile);
-      return `import ${a.className} from "${rel}";`;
-    })
+    .map((a) => `import ${agentLocal.get(a)!} from "${toImportSpec(outDir, a.sourceFile)}";`)
     .join("\n");
-
   const agentReexports =
     agents.length === 0
       ? "// (no agents discovered)"
-      : `export { ${agents.map((a) => a.className).join(", ")} };`;
+      : `export { ${agents.map((a) => `${agentLocal.get(a)!} as ${a.className}`).join(", ")} };`;
 
-  // Workflows discovered under workflow.ts files. Imported + re-exported
-  // the same way agents are so wrangler's `workflows: [{ class_name }]`
-  // entries find them on the module boundary. Workflows don't appear
-  // in the route table or middleware chain — they're triggered by
-  // `this.runWorkflow("BINDING", ...)` calls from agents.
-  const workflows = manifest.workflows;
+  // Workflows are imported + re-exported the same way agents are, so
+  // wrangler's `workflows: [{ class_name }]` entries find them on the
+  // module boundary. They don't appear in the route table — they're
+  // triggered from agents via `this.workflow(...)` / `this.runWorkflow(...)`.
   const workflowImports = workflows
-    .map((w) => {
-      const rel = toImportSpec(outDir, w.sourceFile);
-      return `import ${w.className} from "${rel}";`;
-    })
+    .map((w) => `import ${workflowLocal.get(w)!} from "${toImportSpec(outDir, w.sourceFile)}";`)
     .join("\n");
   const workflowReexports =
     workflows.length === 0
       ? ""
-      : `export { ${workflows.map((w) => w.className).join(", ")} };`;
+      : `export { ${workflows.map((w) => `${workflowLocal.get(w)!} as ${w.className}`).join(", ")} };`;
 
-  // For agents that have a co-located workflow.ts, pair the agent with
-  // its workflow by shared parent directory and inject the binding name
-  // onto the agent's prototype. The `withWorkflow` mixin reads this at
-  // call time so users can write `this.workflow(params)` without a
-  // magic binding string — the framework already knows the pairing.
-  //
-  // Folder-based pairing is the convention: `agents/orders/agent.ts`
-  // pairs with `agents/orders/workflow.ts`. A workflow with no co-located
-  // agent (e.g. a fire-and-forget batch under `workflows/` or one paired
-  // by name only) skips this step — the user falls back to the SDK's
-  // `runWorkflow("BINDING", params)` call.
+  // For agents that have a co-located workflow.ts (same parent directory),
+  // inject the workflow's binding name onto the agent's prototype. The
+  // `withWorkflow` mixin reads this at call time so users can write
+  // `this.workflow(params)` without a magic binding string. The property
+  // is non-enumerable so it doesn't show up in user-facing serialization.
   const workflowBindingPatches = workflows
     .map((w) => {
       const workflowDir = path.dirname(w.sourceFile);
@@ -135,37 +124,24 @@ export function generateEntry(
         (a) => path.dirname(a.sourceFile) === workflowDir,
       );
       if (!pairedAgent) return null;
-      // Direct prototype assignment. The property is non-enumerable so
-      // it doesn't show up in user-facing serialization (e.g. when state
-      // is JSON-stringified). Cast to any because we're patching an
-      // SDK-owned class shape that doesn't declare this property.
-      return `Object.defineProperty(${pairedAgent.className}.prototype, "__ayjntWorkflowBinding", { value: ${JSON.stringify(w.binding)}, enumerable: false });`;
+      return `Object.defineProperty(${agentLocal.get(pairedAgent)!}.prototype, "__ayjntWorkflowBinding", { value: ${JSON.stringify(w.binding)}, enumerable: false });`;
     })
     .filter((s): s is string => s !== null)
     .join("\n");
 
   const middlewareImports = [...middlewareIndex.entries()]
-    .map(([file, i]) => `import mw_${i} from "${toImportSpec(outDir, file)}";`)
+    .map(([file, i]) => `import __ayjnt_mw_${i} from "${toImportSpec(outDir, file)}";`)
     .join("\n");
 
   const routeEntries = routes
     .map((a) => {
       const chain = a.middlewareChain
-        .map((f) => `mw_${middlewareIndex.get(f)!}`)
+        .map((f) => `__ayjnt_mw_${middlewareIndex.get(f)!}`)
         .join(", ");
-      const mcp = isMcpAgent(a) ? "true" : "false";
-      const assetFlat = assetRoutes[a.binding];
-      const assetFlatValue = assetFlat
-        ? JSON.stringify(assetFlat)
-        : "null";
       // docs.md content embedded as a string literal so docs serving doesn't
       // need an extra binding. JSON.stringify handles backticks/${} safely.
+      // `?? null` (not truthiness) so an EMPTY docs.md is still served.
       const docs = docsByBinding[a.binding];
-      const docsValue = docs ? JSON.stringify(docs) : "null";
-      // Catalog metadata — echoed back from /__ayjnt/catalog. Kept inline
-      // (not a separate map) so each route carries its own self-describing
-      // record.
-      const callables = JSON.stringify(a.callables);
       const meta = JSON.stringify({
         agentId: a.agentId,
         className: a.className,
@@ -174,7 +150,7 @@ export function generateEntry(
         hasDocs: a.hasDocs,
         isMcp: isMcpAgent(a),
       });
-      return `  { prefix: ${JSON.stringify(a.routePath)}, binding: ${JSON.stringify(a.binding)}, middleware: [${chain}], isMcp: ${mcp}, assetFlat: ${assetFlatValue}, docs: ${docsValue}, callables: ${callables}, meta: ${meta} },`;
+      return `  { prefix: ${JSON.stringify(a.routePath)}, binding: ${JSON.stringify(a.binding)}, middleware: [${chain}], isMcp: ${isMcpAgent(a)}, assetFlat: ${JSON.stringify(assetRoutes[a.binding] ?? null)}, docs: ${docs === undefined ? "null" : JSON.stringify(docs)}, callables: ${JSON.stringify(a.callables)}, meta: ${meta} },`;
     })
     .join("\n");
 
@@ -184,29 +160,20 @@ export function generateEntry(
       : agents.map((a) => JSON.stringify(a.binding)).join(" | ");
 
   // Map binding → class for runtime reflection. Used by MCP dispatch to
-  // call `CLASSES[binding].serve(...)`.
+  // call static methods (`CLASSES[binding].serve(...)`) on the class itself.
   const classMapEntries = agents
-    .map((a) => `  ${JSON.stringify(a.binding)}: ${a.className},`)
+    .map((a) => `  ${JSON.stringify(a.binding)}: ${agentLocal.get(a)!},`)
     .join("\n");
 
-  // Env is the DO bindings plus, if any agent has an app.tsx, the ASSETS
-  // Fetcher binding wrangler provisions from the assets config.
-  // Email — the entry imports `routeAgentEmail` and either the user's
-  // custom resolver (if email.ts exists at the workspace root) or
-  // uses a manifest-derived inline resolver. See the email() worker
-  // method below for the dispatch shape.
-  const emailImport = emailEnabled
-    ? `import { routeAgentEmail } from "agents";\n`
-    : "";
-  const customResolverImport =
-    emailEnabled && emailResolverFile
-      ? `import customEmailResolver from "${toImportSpec(outDir, emailResolverFile)}";\n`
-      : "";
+  // Binding → route prefix, for MCP dispatch (McpAgent.serve needs the
+  // path prefix as its first argument).
+  const routePrefixEntries = agents
+    .map((a) => `  ${JSON.stringify(a.binding)}: ${JSON.stringify(a.routePath)},`)
+    .join("\n");
 
-  // Env carries the SendEmail binding when the feature is on so
-  // `env.EMAIL` is reachable inside agents (this.env.EMAIL). The
-  // composed type union is built here to keep the literal generator
-  // template readable.
+  // Env is the DO bindings plus feature-derived bindings: the ASSETS
+  // Fetcher when any agent has an app.tsx, the SendEmail binding when the
+  // email feature is on (so `this.env.EMAIL` is reachable inside agents).
   const envExtras: string[] = [];
   if (hasApps) envExtras.push("ASSETS: Fetcher");
   if (emailEnabled) envExtras.push("EMAIL: SendEmail");
@@ -215,9 +182,26 @@ export function generateEntry(
       ? `Record<Binding, DurableObjectNamespace> & { ${envExtras.join("; ")} }`
       : `Record<Binding, DurableObjectNamespace>`;
 
+  const emailImport = emailEnabled
+    ? `import { routeAgentEmail } from "agents";\n`
+    : "";
+  const customResolverImport =
+    emailEnabled && emailResolverFile
+      ? `import __ayjnt_emailResolver from "${toImportSpec(outDir, emailResolverFile)}";\n`
+      : "";
+
   return `// GENERATED by ayjnt — do not edit. Regenerated on every build.
 import { getAgentByName } from "agents";
-${emailImport}${customResolverImport}import { compose, createContext, type Middleware } from "ayjnt/middleware";
+${emailImport}${customResolverImport}import {
+  CATALOG_PATH,
+  DOCS_SEGMENT,
+  buildCatalog,
+  compose,
+  createContext,
+  isHtmlRequest,
+  matchRoute,
+  type AgentRoute,
+} from "ayjnt/router";
 ${middlewareImports}
 ${agentImports}
 ${workflowImports}
@@ -231,41 +215,9 @@ type Binding = ${bindingUnion};
 
 type Env = ${envType};
 
-type CallableMethod = {
-  name: string;
-  params: string;
-  returnType: string | null;
-  description: string | null;
-};
-
-type CatalogMeta = {
-  agentId: string;
-  className: string;
-  routePath: string;
-  hasApp: boolean;
-  hasDocs: boolean;
-  isMcp: boolean;
-};
-
-type Route = {
-  prefix: string;
-  binding: Binding;
-  middleware: Middleware<any>[];
-  /** True when the agent class extends McpAgent. MCP agents dispatch via
-   *  the static \`.serve()\` handler instead of a direct DO fetch. */
-  isMcp: boolean;
-  /** Flat route segment for the assets tree, e.g. "admin_users". Null when
-   *  the agent has no co-located app.tsx. */
-  assetFlat: string | null;
-  /** Inline contents of the agent's docs.md, or null. Served at \`<prefix>/docs\`. */
-  docs: string | null;
-  /** Methods on the agent class flagged with \`@callable\`. Echoed in the catalog. */
-  callables: CallableMethod[];
-  /** Self-describing record returned by /__ayjnt/catalog. */
-  meta: CatalogMeta;
-};
-
-const ROUTES: Route[] = [
+/** Route table, longest prefix first. All dispatch logic lives in
+ *  "ayjnt/router" — this file only supplies the data. */
+const ROUTES: AgentRoute[] = [
 ${routeEntries}
 ];
 
@@ -275,167 +227,10 @@ const CLASSES: Record<Binding, any> = {
 ${classMapEntries}
 };
 
-/** Reserved path that returns the agent catalog as JSON, filtered by which
- *  agents the caller can pass each agent's middleware chain. Lives under the
- *  \`/__ayjnt/\` namespace so it can never collide with a user route. */
-const CATALOG_PATH = "/__ayjnt/catalog";
-
-/** Reserved leaf segment served instead of an instance dispatch. \`/<route>/docs\`
- *  returns the agent's docs.md (404 if no docs.md exists). The trade-off is
- *  that users can't name a DO instance \`docs\` — documented restriction. */
-const DOCS_SEGMENT = "docs";
-
-/** Instance name used when the URL has no instance segment — \`/<route>\` and
- *  \`/<route>/\` both resolve to this. Mirrors the client-side \`useAgent\`
- *  hook (see deriveInstance in src/codegen/client.ts), so the bundled UI
- *  ends up talking to the same Durable Object the worker dispatches to. */
-const DEFAULT_INSTANCE = "default";
-
-type Match =
-  | {
-      kind: "agent";
-      route: Route;
-      binding: Binding;
-      instanceId: string;
-      rest: string;
-      middleware: Middleware<any>[];
-      isMcp: boolean;
-      assetFlat: string | null;
-    }
-  | {
-      kind: "docs";
-      route: Route;
-      binding: Binding;
-      middleware: Middleware<any>[];
-    };
-
-function matchRoute(pathname: string): Match | null {
-  for (const route of ROUTES) {
-    if (
-      pathname === route.prefix ||
-      pathname.startsWith(route.prefix + "/")
-    ) {
-      const remainder = pathname.slice(route.prefix.length);
-      const parts = remainder.split("/").filter(Boolean);
-
-      // \`<route>/docs\` (exactly) → docs request. Hits the same middleware
-      // chain as the agent so auth gates docs too.
-      if (parts.length === 1 && parts[0] === DOCS_SEGMENT) {
-        return {
-          kind: "docs",
-          route,
-          binding: route.binding,
-          middleware: route.middleware,
-        };
-      }
-
-      // MCP agents don't use our instanceId scheme — the MCP transport
-      // handles session management internally via headers. Accept the
-      // route match even without an instance segment.
-      if (route.isMcp) {
-        return {
-          kind: "agent",
-          route,
-          binding: route.binding,
-          instanceId: "",
-          rest: remainder || "/",
-          middleware: route.middleware,
-          isMcp: true,
-          assetFlat: route.assetFlat,
-        };
-      }
-      // No instance segment? Default to "default". \`/counter\` and
-      // \`/counter/\` both resolve to the same DO as \`/counter/default\`,
-      // matching what the bundled \`useAgent()\` hook derives client-side.
-      const instanceId = parts[0] ?? DEFAULT_INSTANCE;
-      const rest = "/" + parts.slice(1).join("/");
-      return {
-        kind: "agent",
-        route,
-        binding: route.binding,
-        instanceId,
-        rest,
-        middleware: route.middleware,
-        isMcp: false,
-        assetFlat: route.assetFlat,
-      };
-    }
-  }
-  return null;
-}
-
-/**
- * Build the agent catalog by probing every route's middleware chain with
- * the original request. A route appears in the result when its middleware
- * either calls \`next()\` to completion OR returns a 2xx response — both
- * indicate the caller has access. Any 3xx/4xx/5xx short-circuit hides
- * the agent.
- *
- * Probing runs in parallel and shares the request headers, so an
- * \`Authorization\` header that unlocks /admin/* unlocks all admin agents
- * in a single round of probes.
- */
-async function buildCatalog(
-  request: Request,
-  url: URL,
-  env: Env,
-  executionCtx: ExecutionContext,
-): Promise<unknown> {
-  const PROBE_OK = 999;
-  const sentinel = async (): Promise<Response> =>
-    new Response(null, { status: PROBE_OK });
-
-  const visible = await Promise.all(
-    ROUTES.map(async (route) => {
-      try {
-        let status = PROBE_OK;
-        if (route.middleware.length > 0) {
-          const c = createContext({
-            request,
-            url,
-            env,
-            executionCtx,
-            params: { instanceId: "", pathSuffix: "/" },
-          });
-          const res = await compose(route.middleware, c, sentinel);
-          status = res.status;
-        }
-        const accessible = status === PROBE_OK || (status >= 200 && status < 300);
-        if (!accessible) return null;
-        return {
-          ...route.meta,
-          callables: route.callables,
-          docsUrl: route.meta.hasDocs ? \`\${route.meta.routePath}/\${DOCS_SEGMENT}\` : null,
-        };
-      } catch {
-        // Middleware that throws is treated as inaccessible — fail closed.
-        return null;
-      }
-    }),
-  );
-
-  return {
-    version: 1,
-    agents: visible.filter((a): a is NonNullable<typeof a> => a !== null),
-  };
-}
-
-/**
- * True when the client wants HTML (browser navigation), not a WebSocket
- * upgrade or HTTP API call. Used to pick HTML vs agent dispatch for the
- * same URL. Order of checks matters: \`Upgrade: websocket\` wins over
- * \`Accept: text/html\` even if both are set (some clients do).
- */
-function isHtmlRequest(request: Request): boolean {
-  if (request.method !== "GET") return false;
-  if (
-    request.headers.get("upgrade")?.toLowerCase() === "websocket"
-  ) {
-    return false;
-  }
-  const accept = request.headers.get("accept") ?? "";
-  return accept.includes("text/html");
-}
+/** Binding → route prefix. McpAgent.serve takes the prefix as its first arg. */
+const ROUTE_PREFIX_BY_BINDING: Record<Binding, string> = {
+${routePrefixEntries}
+};
 
 export default {
   async fetch(
@@ -446,78 +241,87 @@ export default {
     const url = new URL(request.url);
 
     // Reserved global path: catalog. Probes every agent's middleware
-    // against the current request and returns only the accessible set.
+    // (against a body-less GET marked x-ayjnt-probe) and returns only the
+    // accessible set.
     if (url.pathname === CATALOG_PATH) {
-      const catalog = await buildCatalog(request, url, env, executionCtx);
-      return Response.json(catalog);
+      if (request.method !== "GET") {
+        return new Response("method not allowed", {
+          status: 405,
+          headers: { allow: "GET" },
+        });
+      }
+      return Response.json(
+        await buildCatalog(ROUTES, request, env, executionCtx),
+      );
     }
 
-    const match = matchRoute(url.pathname);
+    const match = matchRoute(ROUTES, url.pathname);
     if (!match) {
       return new Response("Not found", { status: 404 });
     }
+    const route = match.route;
 
-    // Middleware runs for both UI, docs, and agent dispatch so admin auth
+    // Middleware runs for UI, docs, and agent dispatch alike, so admin auth
     // gates everything, not just the API. The dispatch choice happens
     // inside finalize, after all middleware has had a chance to short-circuit.
     const finalize = async (): Promise<Response> => {
       // Docs: serve the embedded markdown. 404 if no docs.md was authored.
       if (match.kind === "docs") {
-        if (!match.route.docs) {
+        if (route.docs == null) {
           return new Response("docs not found", { status: 404 });
         }
-        return new Response(match.route.docs, {
+        return new Response(route.docs, {
           headers: { "content-type": "text/markdown; charset=utf-8" },
         });
       }
 
-      if (match.isMcp) {
+      if (route.isMcp) {
         // McpAgent.serve produces a { fetch } handler that manages the MCP
-        // transport (streamable-http / SSE) at the message level and
-        // dispatches to the DO internally. We forward the original request
-        // verbatim — MCP's handler parses the path against the prefix we
-        // pass it to find the right session.
-        const ClassRef = CLASSES[match.binding];
-        const handler = ClassRef.serve(
-          ROUTE_PREFIX_BY_BINDING[match.binding],
-          { binding: match.binding },
+        // transport (streamable-http / SSE) and dispatches to the DO
+        // internally. We forward the original request verbatim — MCP's
+        // handler parses the path against the prefix we pass it.
+        const handler = CLASSES[route.binding as Binding].serve(
+          ROUTE_PREFIX_BY_BINDING[route.binding as Binding],
+          { binding: route.binding },
         );
         return handler.fetch(request, env, executionCtx);
       }
 
       // HTML navigation for an agent with a co-located app.tsx: fetch the
       // pre-bundled shell from the Assets binding, keeping the user's URL
-      // intact. The HTML references /__ayjnt/<flat>/app.js which is served
-      // directly by Assets on its own (no worker trip).
-      if (match.assetFlat && isHtmlRequest(request)) {
+      // intact. The HTML references /__ayjnt/<flat>/* assets which are
+      // served directly by Assets on their own (no worker trip).
+      if (route.assetFlat && isHtmlRequest(request)) {
         const assetUrl = new URL(url);
-        assetUrl.pathname = \`/__ayjnt/\${match.assetFlat}/index.html\`;
+        assetUrl.pathname = \`/__ayjnt/\${route.assetFlat}/index.html\`;
         return (env as any).ASSETS.fetch(new Request(assetUrl, request));
       }
 
       // getAgentByName does: idFromName → get → stub.setName(name). The
       // setName step is what teaches the DO its own identity so the
       // CF_AGENT_IDENTITY message to the client is correct.
-      const stub = await getAgentByName(env[match.binding], match.instanceId);
+      const stub = await getAgentByName(
+        env[route.binding as Binding],
+        match.instanceId,
+      );
       const forwarded = new URL(url);
       forwarded.pathname = match.rest || "/";
       return stub.fetch(new Request(forwarded, request));
     };
 
-    if (match.middleware.length === 0) return finalize();
+    if (route.middleware.length === 0) return finalize();
 
-    const ctxParams =
-      match.kind === "agent"
-        ? { instanceId: match.instanceId, pathSuffix: match.rest }
-        : { instanceId: "", pathSuffix: "/" + DOCS_SEGMENT };
     const c = createContext({
       request,
       url,
       env,
       executionCtx,
-      params: ctxParams,
+      params:
+        match.kind === "agent"
+          ? { instanceId: match.instanceId, pathSuffix: match.rest }
+          : { instanceId: "", pathSuffix: "/" + DOCS_SEGMENT },
     });
-    return compose(match.middleware, c, finalize);
+    return compose(route.middleware, c, finalize);
   },${
     emailEnabled
       ? `
@@ -544,7 +348,7 @@ export default {
     executionCtx: ExecutionContext,
   ): Promise<void> {
     await routeAgentEmail(message, env, {
-      resolver: ${emailResolverFile ? "customEmailResolver" : "defaultEmailResolver"},
+      resolver: ${emailResolverFile ? "__ayjnt_emailResolver" : "__ayjntDefaultEmailResolver"},
     });
   },`
       : ""
@@ -553,19 +357,15 @@ export default {
     emailEnabled && !emailResolverFile
       ? `
 
-/** Manifest-derived default resolver. Maps the local-part of the email's
- *  \`to\` address to an agent route (without leading slash), pulling an
+/** Manifest-derived default resolver. Maps the local part of the email's
+ *  \`to\` address to an agent (keyed by the LAST segment of the agent's
+ *  route, lowercased — email local parts can't contain "/"), pulling an
  *  optional instance id from a \`+suffix\` sub-address. */
 const EMAIL_ROUTES: Record<string, { agentName: string }> = {
-${emailRoutes
-  .map(
-    (a) =>
-      `  ${JSON.stringify(a.routePath.slice(1))}: { agentName: ${JSON.stringify(classNameToKebab(a.className))} },`,
-  )
-  .join("\n")}
+${buildEmailRouteEntries(agents)}
 };
 
-async function defaultEmailResolver(
+async function __ayjntDefaultEmailResolver(
   message: ForwardableEmailMessage,
 ): Promise<{ agentName: string; agentId: string } | null> {
   const to = message.to ?? "";
@@ -582,13 +382,42 @@ async function defaultEmailResolver(
 }`
       : ""
   }
-
-/** Binding → route prefix. Used for MCP dispatch (McpAgent.serve needs the
- *  path prefix as its first argument). */
-const ROUTE_PREFIX_BY_BINDING: Record<Binding, string> = {
-${agents.map((a) => `  ${JSON.stringify(a.binding)}: ${JSON.stringify(a.routePath)},`).join("\n")}
-};
 `;
+}
+
+/**
+ * Build the EMAIL_ROUTES map entries for agents that implement onEmail.
+ *
+ * Keys are the LAST route segment, lowercased — `agents/support/agent.ts`
+ * answers `support@…`, and `agents/eu/support/agent.ts` would too. Email
+ * local parts can't contain "/", so keying by the full route path (the
+ * old behavior) made nested agents unreachable by mail. Throws when two
+ * onEmail agents collide on the same local part, since silently routing
+ * to one of them would lose mail.
+ */
+function buildEmailRouteEntries(agents: AgentEntry[]): string {
+  const byLocalPart = new Map<string, AgentEntry>();
+  for (const a of agents) {
+    if (!a.hasOnEmail) continue;
+    const leaf = a.routePath.split("/").filter(Boolean).pop() ?? "";
+    const key = leaf.toLowerCase();
+    const prior = byLocalPart.get(key);
+    if (prior) {
+      throw new Error(
+        `Two agents with onEmail() resolve to the same email local part "${key}":\n` +
+          `  ${prior.routePath} (${prior.sourceFile})\n` +
+          `  ${a.routePath} (${a.sourceFile})\n` +
+          `Rename one folder, or add a custom email.ts resolver at the project root.`,
+      );
+    }
+    byLocalPart.set(key, a);
+  }
+  return [...byLocalPart.entries()]
+    .map(
+      ([key, a]) =>
+        `  ${JSON.stringify(key)}: { agentName: ${JSON.stringify(classNameToKebab(a.className))} },`,
+    )
+    .join("\n");
 }
 
 /**

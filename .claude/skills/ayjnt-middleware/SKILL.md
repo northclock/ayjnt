@@ -59,6 +59,14 @@ export default middleware;
 - **Return a `Response` to short-circuit.** Any non-2xx response from
   middleware hides the agent from `/__ayjnt/catalog` for that caller
   — auth-gate middleware → invisible admin agents for anonymous users.
+- **Catalog probes are marked.** `/__ayjnt/catalog` probes every agent's
+  chain with a body-less GET carrying `x-ayjnt-probe: catalog`. Rate-limit
+  or audit middleware that shouldn't count phantom requests can check that
+  header (or `c.url.pathname === "/__ayjnt/catalog"`) and skip the side
+  effect while still gating.
+- **`await next()` without a return is fine** (Hono semantics — the inner
+  response passes through). Returning a `Response` after `await next()`
+  overrides it.
 - **Mutate response headers AFTER `await next()`** if you need to
   observe the agent's response. Doing it before runs against an
   unborrowed Response.
