@@ -25,7 +25,13 @@ export type { AgentEntry, CallableMethod, WorkflowEntry };
  *  assets Fetcher). An agent or workflow class whose derived binding lands
  *  on one of these would silently shadow the framework binding on `env`,
  *  so we reject it at scan time with a rename instruction. */
-const RESERVED_BINDINGS = new Set(["BROWSER", "LOADER", "AI", "EMAIL", "ASSETS"]);
+const RESERVED_BINDINGS = new Set([
+  "BROWSER",
+  "LOADER",
+  "AI",
+  "EMAIL",
+  "ASSETS",
+]);
 
 /**
  * Scan the project for agents. Returns a Manifest with all discovered agents
@@ -42,6 +48,7 @@ export async function scan(root: string): Promise<Manifest> {
       agents: [],
       workflows: await scanWorkflows(root),
       features: emptyFeatures(),
+      rootApp: null,
     };
   }
 
@@ -126,7 +133,17 @@ export async function scan(root: string): Promise<Manifest> {
   const workflows = await scanWorkflows(root);
   assertUniqueWorkflows(workflows, entries);
 
-  return { root, agents: entries, workflows, features };
+  /** Root middleware chain (root → leaf), same shape as
+   *  AgentEntry.middlewareChain. The `/` UI runs through it. */
+
+  const rootAppFile = path.join(agentsDir, "app.tsx");
+  const rootApp = existsSync(rootAppFile)
+    ? {
+        sourceFile: rootAppFile,
+        middlewareChain: await resolveMiddlewareChain(agentsDir, root),
+      }
+    : null;
+  return { root, agents: entries, workflows, features, rootApp };
 }
 
 /**
@@ -207,7 +224,11 @@ function assertUniqueWorkflows(
   const seen = new Map<string, string>();
   for (const a of agents) seen.set(a.binding, `agent ${a.sourceFile}`);
   for (const w of workflows) {
-    assertNotReservedBinding(w.binding, w.className, `workflow ${w.sourceFile}`);
+    assertNotReservedBinding(
+      w.binding,
+      w.className,
+      `workflow ${w.sourceFile}`,
+    );
     const prior = seen.get(w.binding);
     if (prior) {
       throw new Error(
@@ -770,7 +791,11 @@ function assertUnique(entries: AgentEntry[]): void {
   };
 
   for (const entry of entries) {
-    assertNotReservedBinding(entry.binding, entry.className, `agent ${entry.sourceFile}`);
+    assertNotReservedBinding(
+      entry.binding,
+      entry.className,
+      `agent ${entry.sourceFile}`,
+    );
     check("routePath", entry.routePath, entry);
     check("binding", entry.binding, entry);
     check("agentId", entry.agentId, entry);

@@ -57,6 +57,9 @@ import { deriveWorkerName, generateWrangler } from "../codegen/wrangler.ts";
 import type { AgentEntry, Manifest } from "../core/types.ts";
 import { parseArgs } from "./util.ts";
 
+/** Reserved flat asset segment for the root agents/app.tsx UI. */
+const ROOT_APP_FLAT = "__home";
+
 export type RunBuildOptions = {
   cwd: string;
   /** Write the updated lockfile to disk. dev/build pass true; deploy passes
@@ -146,40 +149,27 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   for (const agent of manifest.agents) {
     if (!agent.hasApp) continue;
     const userAppPath = path.join(path.dirname(agent.sourceFile), "app.tsx");
-    const source = await Bun.file(userAppPath).text();
-
-    // If app.tsx exports a default React component, we generate a mount
-    // wrapper at .ayjnt/client/<route>/mount.tsx and bundle THAT instead.
-    // The wrapper owns createRoot + StrictMode + error boundary, so users
-    // never write mount boilerplate. No default export = the legacy
-    // manual-mount pattern; bundle it directly with a deprecation warning.
-    let bundleEntry: string;
-    if (hasDefaultExport(source)) {
-      const mountDir = path.join(dotDir, clientDirFor(agent));
-      mkdirSync(mountDir, { recursive: true });
-      const mountPath = path.join(mountDir, "mount.tsx");
-      const appImportPath = path
-        .relative(path.dirname(mountPath), userAppPath)
-        .replace(/\\/g, "/");
-      const importSpec = appImportPath.startsWith(".")
-        ? appImportPath
-        : "./" + appImportPath;
-      await Bun.write(
-        mountPath,
-        generateMountEntry({ appImportPath: importSpec }),
-      );
-      bundleEntry = mountPath;
-    } else {
-      log(
-        `⚠ ayjnt: ${path.relative(cwd, userAppPath)} uses manual createRoot — deprecated. Export default your component; the framework will handle the mount.`,
-      );
-      bundleEntry = userAppPath;
-    }
-
     bundles.push({
       agent,
       flat: flattenRoute(agent.routePath),
-      bundle: await bundleApp({ appEntry: bundleEntry, projectRoot: cwd }),
+      bundle: await bundleUiApp({
+        userAppPath,
+        mountDir: path.join(dotDir, clientDirFor(agent)),
+        cwd,
+        log,
+      }),
+    });
+  }
+
+  // Root home app (agents/app.tsx), bundled the same way into the reserved
+  // __home segment. null when there's no root app.
+  let rootAppBundle: BundledApp | null = null;
+  if (manifest.rootApp) {
+    rootAppBundle = await bundleUiApp({
+      userAppPath: manifest.rootApp.sourceFile,
+      mountDir: path.join(dotDir, "client", ROOT_APP_FLAT),
+      cwd,
+      log,
     });
   }
 
@@ -208,6 +198,26 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   }
   const appCount = bundles.length;
 
+  // Root home app shares the same flat layout under the reserved segment.
+  if (rootAppBundle) {
+    const dir = path.join(assetsScoped, ROOT_APP_FLAT);
+    mkdirSync(dir, { recursive: true });
+    await Bun.write(path.join(dir, "app.js"), rootAppBundle.entryJs);
+    for (const extra of rootAppBundle.extras) {
+      await Bun.write(path.join(dir, extra.fileName), extra.bytes);
+    }
+    await Bun.write(
+      path.join(dir, "index.html"),
+      generateHtmlShell({
+        title: "Home",
+        scriptSrc: `/__ayjnt/${ROOT_APP_FLAT}/app.js`,
+        styleSrcs: rootAppBundle.styles.map(
+          (n) => `/__ayjnt/${ROOT_APP_FLAT}/${n}`,
+        ),
+      }),
+    );
+  }
+
   // 6-7: worker entry + wrangler config.
   //
   // docs.md content is loaded once per agent and inlined as a string literal
@@ -231,6 +241,7 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
       outPath: entryPath,
       assetRoutes,
       docs: docsByBinding,
+      rootAppFlat: rootAppBundle ? ROOT_APP_FLAT : undefined,
     }),
   );
 
@@ -243,7 +254,7 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     wranglerPath,
     generateWrangler(manifest, finalLock, {
       name,
-      hasApps: appCount > 0,
+      hasApps: appCount > 0 || rootAppBundle !== null,
       ...(compatibilityDate ? { compatibilityDate } : {}),
     }),
   );
@@ -271,8 +282,9 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
 
   const appSuffix = appCount ? `, ${appCount} with UI` : "";
   const docsSuffix = docsCount ? `, ${docsCount} with docs` : "";
+  const homeSuffix = rootAppBundle ? `, home UI at /` : "";
   log(
-    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix}${docsSuffix} → .ayjnt/dist/wrangler.jsonc`,
+    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix}${docsSuffix}${homeSuffix} → .ayjnt/dist/wrangler.jsonc`,
   );
 
   return {
@@ -306,6 +318,50 @@ function assertUniqueAssetRoutes(manifest: Manifest): void {
     }
     byFlat.set(flat, agent);
   }
+  // The root home UI owns the reserved __home segment; an agent route that
+  // flattens to it would clobber the home bundle (and vice versa).
+  if (manifest.rootApp && byFlat.has(ROOT_APP_FLAT)) {
+    throw new Error(
+      `Agent route ${byFlat.get(ROOT_APP_FLAT)!.routePath} flattens to ` +
+        `"${ROOT_APP_FLAT}", which is reserved for the root agents/app.tsx UI. ` +
+        `Rename the folder.`,
+    );
+  }
+}
+
+/**
+ * Bundle one UI `app.tsx`. If it default-exports a component we generate a
+ * mount wrapper (createRoot + StrictMode + error boundary) and bundle that;
+ * otherwise we bundle the file directly with a deprecation warning. Shared
+ * by per-agent apps and the root home app so both follow the same rules.
+ */
+async function bundleUiApp(params: {
+  userAppPath: string;
+  mountDir: string;
+  cwd: string;
+  log: (msg: string) => void;
+}): Promise<BundledApp> {
+  const source = await Bun.file(params.userAppPath).text();
+  let bundleEntry: string;
+  if (hasDefaultExport(source)) {
+    mkdirSync(params.mountDir, { recursive: true });
+    const mountPath = path.join(params.mountDir, "mount.tsx");
+    const rel = path
+      .relative(params.mountDir, params.userAppPath)
+      .replace(/\\/g, "/");
+    const importSpec = rel.startsWith(".") ? rel : "./" + rel;
+    await Bun.write(
+      mountPath,
+      generateMountEntry({ appImportPath: importSpec }),
+    );
+    bundleEntry = mountPath;
+  } else {
+    params.log(
+      `⚠ ayjnt: ${path.relative(params.cwd, params.userAppPath)} uses manual createRoot — deprecated. Export default your component; the framework will handle the mount.`,
+    );
+    bundleEntry = params.userAppPath;
+  }
+  return bundleApp({ appEntry: bundleEntry, projectRoot: params.cwd });
 }
 
 /**

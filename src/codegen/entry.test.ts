@@ -545,3 +545,53 @@ describe("generateEntry", () => {
     expect(out).not.toContain("__ayjntWorkflowBinding");
   });
 });
+
+describe("root home app", () => {
+  const withRootApp = (m: Manifest): Manifest => ({
+    ...m,
+    rootApp: { sourceFile: "/fake/agents/app.tsx", middlewareChain: [] },
+  });
+
+  test("rootAppFlat emits HOME_APP, the / branch, and the ASSETS binding", () => {
+    const out = generateEntry(withRootApp(mf([agent({})])), {
+      ...OUT,
+      rootAppFlat: "__home",
+    });
+    expect(out).toContain("const HOME_APP");
+    expect(out).toContain('flat: "__home"');
+    expect(out).toContain('url.pathname === "/" && isHtmlRequest(request)');
+    expect(out).toContain("ASSETS: Fetcher");
+  });
+
+  test("root middleware is threaded into HOME_APP via a deduped mw import", () => {
+    const rootMw = "/fake/agents/middleware.ts";
+    const m = mf([
+      agent({ middlewareChain: [rootMw] }),
+    ]);
+    const out = generateEntry(
+      { ...m, rootApp: { sourceFile: "/fake/agents/app.tsx", middlewareChain: [rootMw] } },
+      { ...OUT, rootAppFlat: "__home" },
+    );
+    // Imported once, and HOME_APP references that same index.
+    expect(out).toContain(`import __ayjnt_mw_0 from "../../agents/middleware.ts"`);
+    expect(out).toContain("middleware: [__ayjnt_mw_0] }");
+  });
+
+  test("no root app → HOME_APP is null and there's no ASSETS binding", () => {
+    const out = generateEntry(mf([agent({})]), OUT);
+    expect(out).toContain(
+      "const HOME_APP: { flat: string; middleware: Middleware<any>[] } | null = null;",
+    );
+    expect(out).not.toContain("ASSETS: Fetcher");
+  });
+
+  test("works with zero agents (home-only project)", () => {
+    const out = generateEntry(withRootApp(mf([])), {
+      ...OUT,
+      rootAppFlat: "__home",
+    });
+    expect(out).toContain("type Binding = never");
+    expect(out).toContain('flat: "__home"');
+    expect(out).toContain("ASSETS: Fetcher");
+  });
+});

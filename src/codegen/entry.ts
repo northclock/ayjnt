@@ -52,6 +52,9 @@ export type EntryOptions = {
    *  Embedded as a string literal in the generated entry so the worker can
    *  serve it from `<routePath>/docs` without an extra binding. */
   docs?: Record<string, string>;
+  /** Reserved flat asset segment for the root home UI (agents/app.tsx), or
+   *  undefined when there's no root app. Set by build.ts after bundling. */
+  rootAppFlat?: string;
 };
 
 export function generateEntry(
@@ -63,7 +66,8 @@ export function generateEntry(
   const workflows = manifest.workflows;
   const assetRoutes = options.assetRoutes ?? {};
   const docsByBinding = options.docs ?? {};
-  const hasApps = Object.keys(assetRoutes).length > 0;
+  const hasApps =
+    Object.keys(assetRoutes).length > 0 || !!options.rootAppFlat;
   const emailEnabled = manifest.features.email;
   const emailResolverFile = manifest.features.emailResolverFile;
 
@@ -84,6 +88,11 @@ export function generateEntry(
     for (const mw of a.middlewareChain) {
       if (!middlewareIndex.has(mw)) middlewareIndex.set(mw, middlewareIndex.size);
     }
+  }
+  // The root home app's chain must be registered too, or its mw_<N> import
+  // is never emitted — and with zero agents it'd be missed entirely.
+  for (const mw of manifest.rootApp?.middlewareChain ?? []) {
+    if (!middlewareIndex.has(mw)) middlewareIndex.set(mw, middlewareIndex.size);
   }
 
   // Sort routes longest-first so prefix matching picks the specific route.
@@ -171,6 +180,16 @@ export function generateEntry(
     .map((a) => `  ${JSON.stringify(a.binding)}: ${JSON.stringify(a.routePath)},`)
     .join("\n");
 
+  // Root home UI (agents/app.tsx) — served at "/" through the root
+  // middleware chain. The chain references reuse the same __ayjnt_mw_<N>
+  // imports the route table uses.
+  const rootAppChain = (manifest.rootApp?.middlewareChain ?? [])
+    .map((f) => `__ayjnt_mw_${middlewareIndex.get(f)!}`)
+    .join(", ");
+  const homeAppConst = options.rootAppFlat
+    ? `const HOME_APP: { flat: string; middleware: Middleware<any>[] } | null = { flat: ${JSON.stringify(options.rootAppFlat)}, middleware: [${rootAppChain}] };`
+    : `const HOME_APP: { flat: string; middleware: Middleware<any>[] } | null = null;`;
+
   // Env is the DO bindings plus feature-derived bindings: the ASSETS
   // Fetcher when any agent has an app.tsx, the SendEmail binding when the
   // email feature is on (so `this.env.EMAIL` is reachable inside agents).
@@ -201,6 +220,7 @@ ${emailImport}${customResolverImport}import {
   isHtmlRequest,
   matchRoute,
   type AgentRoute,
+  type Middleware,
 } from "ayjnt/router";
 ${middlewareImports}
 ${agentImports}
@@ -232,6 +252,8 @@ const ROUTE_PREFIX_BY_BINDING: Record<Binding, string> = {
 ${routePrefixEntries}
 };
 
+${homeAppConst}
+
 export default {
   async fetch(
     request: Request,
@@ -253,6 +275,26 @@ export default {
       return Response.json(
         await buildCatalog(ROUTES, request, env, executionCtx),
       );
+    }
+
+    // Root UI: agents/app.tsx is served at "/" for HTML navigations, gated by
+    // the root middleware chain. A non-"/" path or a non-HTML request to "/"
+    // falls through to the normal route match (which 404s "/" as before).
+    if (HOME_APP && url.pathname === "/" && isHtmlRequest(request)) {
+      const serveHome = async (): Promise<Response> => {
+        const assetUrl = new URL(url);
+        assetUrl.pathname = \`/__ayjnt/\${HOME_APP.flat}/index.html\`;
+        return (env as any).ASSETS.fetch(new Request(assetUrl, request));
+      };
+      if (HOME_APP.middleware.length === 0) return serveHome();
+      const c = createContext({
+        request,
+        url,
+        env,
+        executionCtx,
+        params: { instanceId: "", pathSuffix: "/" },
+      });
+      return compose(HOME_APP.middleware, c, serveHome);
     }
 
     const match = matchRoute(ROUTES, url.pathname);
