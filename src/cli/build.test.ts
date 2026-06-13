@@ -12,6 +12,7 @@ import {
   readFileSync,
   readlinkSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -151,5 +152,158 @@ describe("syncDevVars", () => {
     syncDevVars(project, dist, (m) => messages.push(m));
     // Happy path: no warnings on POSIX.
     expect(messages).toEqual([]);
+  });
+});
+
+// runBuild integration: the client tree must be regenerated from scratch on
+// every build so renamed/deleted agents can't leave stale typed hooks behind
+// (a stale hook keeps the user's old `@ayjnt/<route>` import compiling and
+// silently targets a route the worker no longer serves).
+import { runBuild } from "./build.ts";
+import { writeFile, mkdir, rename } from "node:fs/promises";
+
+describe("runBuild client-tree cleanup", () => {
+  test("renaming an agent folder removes the orphaned client hook", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-build-"));
+    await mkdir(path.join(proj, "agents/chat"), { recursive: true });
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name: "cleanup-test", type: "module" }),
+    );
+    await writeFile(
+      path.join(proj, "agents/chat/agent.ts"),
+      `export default class ChatAgent extends Agent {}`,
+    );
+
+    await runBuild({ cwd: proj, quiet: true });
+    expect(existsSync(path.join(proj, ".ayjnt/client/chat/index.tsx"))).toBe(true);
+
+    // Folder rename — same class, new route.
+    await rename(path.join(proj, "agents/chat"), path.join(proj, "agents/support"));
+    await runBuild({ cwd: proj, quiet: true });
+
+    expect(existsSync(path.join(proj, ".ayjnt/client/support/index.tsx"))).toBe(true);
+    expect(existsSync(path.join(proj, ".ayjnt/client/chat"))).toBe(false);
+
+    // And the folder move must NOT have staged a storage-destroying
+    // migration: one v1 entry, no deleted_classes anywhere.
+    const lock = JSON.parse(
+      readFileSync(path.join(proj, ".ayjnt/migrations.json"), "utf8"),
+    );
+    expect(lock.migrations).toHaveLength(1);
+    expect(lock.migrations[0].deleted_classes).toBeUndefined();
+    expect(lock.classes["support"].className).toBe("ChatAgent");
+
+    rmSync(proj, { recursive: true, force: true });
+  });
+});
+
+describe("runBuild atomicity and validation", () => {
+  // Apps in these fixtures use the legacy manual-mount shape (no default
+  // export) so bundling needs no React install — these tests are about
+  // build ORDERING and validation, not the mount wrapper.
+  const scaffold = async (proj: string, name = "atomicity-test") => {
+    await mkdir(path.join(proj, "agents/x"), { recursive: true });
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name, type: "module" }),
+    );
+    await writeFile(
+      path.join(proj, "agents/x/agent.ts"),
+      `export default class XAgent extends Agent {}`,
+    );
+  };
+
+  test("a failing bundle aborts before destroying prior assets or staging the lockfile", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-atomic-"));
+    await scaffold(proj);
+    await writeFile(
+      path.join(proj, "agents/x/app.tsx"),
+      `document.body.appendChild(document.createElement("div"));`,
+    );
+    await runBuild({ cwd: proj, quiet: true });
+    const assetPath = path.join(proj, ".ayjnt/assets/__ayjnt/x/app.js");
+    expect(existsSync(assetPath)).toBe(true);
+    const goodAsset = readFileSync(assetPath, "utf8");
+    rmSync(path.join(proj, ".ayjnt/migrations.json"));
+
+    // Break the app and rebuild: must reject, keep the old asset bytes, and
+    // NOT write a lockfile (bundling happens before any destructive step).
+    await writeFile(
+      path.join(proj, "agents/x/app.tsx"),
+      `import "package-that-does-not-exist";
+document.body.appendChild(document.createElement("div"));`,
+    );
+    await expect(runBuild({ cwd: proj, quiet: true })).rejects.toThrow(
+      /package-that-does-not-exist/,
+    );
+    expect(readFileSync(assetPath, "utf8")).toBe(goodAsset);
+    expect(existsSync(path.join(proj, ".ayjnt/migrations.json"))).toBe(false);
+
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("two app routes flattening to the same asset segment are rejected", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-flatcol-"));
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name: "flat-col", type: "module" }),
+    );
+    // Note the explicit agentId: with DEFAULT ids these two folders would
+    // already collide on agentId in scan (ids derive like flats do) — the
+    // flat check matters exactly when an explicit id bypasses that.
+    for (const [dir, cls, idLine] of [
+      ["agents/admin/users", "AdminUsersAgent", ""],
+      ["agents/admin_users", "AdminFlatAgent", 'export const agentId = "flat_v1";\n'],
+    ] as const) {
+      await mkdir(path.join(proj, dir), { recursive: true });
+      await writeFile(
+        path.join(proj, dir, "agent.ts"),
+        `${idLine}export default class ${cls} extends Agent {}`,
+      );
+      await writeFile(
+        path.join(proj, dir, "app.tsx"),
+        `document.body.appendChild(document.createElement("div"));`,
+      );
+    }
+    await expect(runBuild({ cwd: proj, quiet: true })).rejects.toThrow(
+      /both flatten to the asset segment "admin_users"/,
+    );
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("missing package.json name falls back to the directory name with a warning", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-noname-"));
+    await mkdir(path.join(proj, "agents/x"), { recursive: true });
+    await writeFile(path.join(proj, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(
+      path.join(proj, "agents/x/agent.ts"),
+      `export default class XAgent extends Agent {}`,
+    );
+    await runBuild({ cwd: proj, quiet: true });
+    const cfg = JSON.parse(
+      readFileSync(path.join(proj, ".ayjnt/dist/wrangler.jsonc"), "utf8")
+        .split("\n").slice(1).join("\n"),
+    );
+    expect(cfg.name).toBe(path.basename(proj).toLowerCase());
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("deferDeletions: a vanished agent is not staged as deleted_classes", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-defer-"));
+    await scaffold(proj, "defer-test");
+    await runBuild({ cwd: proj, quiet: true });
+    const lockBefore = readFileSync(path.join(proj, ".ayjnt/migrations.json"), "utf8");
+
+    rmSync(path.join(proj, "agents/x"), { recursive: true, force: true });
+    // dev-style rebuild: deletion must NOT land in the lockfile…
+    await runBuild({ cwd: proj, quiet: true, deferDeletions: true });
+    expect(readFileSync(path.join(proj, ".ayjnt/migrations.json"), "utf8")).toBe(lockBefore);
+
+    // …but an explicit build stages it.
+    await runBuild({ cwd: proj, quiet: true });
+    const lock = JSON.parse(readFileSync(path.join(proj, ".ayjnt/migrations.json"), "utf8"));
+    expect(lock.migrations.at(-1).deleted_classes).toEqual(["XAgent"]);
+    rmSync(proj, { recursive: true, force: true });
   });
 });

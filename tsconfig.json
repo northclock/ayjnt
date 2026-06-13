@@ -36,6 +36,7 @@
     // Browser-only files. Live in tsconfig.client.json which adds DOM
     // lib + @types/react. Excluding them here keeps the worker-side
     // check honest about not using DOM globals.
-    "src/runtime/voiceClient.tsx"
+    "src/runtime/voiceClient.tsx",
+    "src/runtime/voiceClient.test.ts"
   ]
 }

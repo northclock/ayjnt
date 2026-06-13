@@ -1,25 +1,24 @@
 // ayjnt build — the codegen pipeline. Everything that dev and deploy do
 // funnels through runBuild() so the behavior is identical across commands.
 //
-// Steps (in order — later steps depend on files from earlier ones):
-//   1. scan(root)                                    → Manifest
-//   2. readLockfile(root)                            → MigrationLockfile
-//   3. diffMigrations                                → MigrationDiff
-//   4. applyDiff                                     → finalLockfile
-//   5. writeLockfile (optional — deploy skips this)
-//   5b.syncDevVars(root, dist)                       → relative symlinks
-//        in .ayjnt/dist/ pointing at the project-root .dev.vars{,.<env>}.
-//        Required because wrangler resolves .dev.vars against the
-//        wrangler.jsonc directory (configDir), not its cwd.
-//   6. generateTsconfig  → .ayjnt/tsconfig.json
-//   7. generateEnvTypes  → .ayjnt/env.d.ts
-//   8. generateClientHook per agent → .ayjnt/client/<route>/index.tsx
-//   9. Wipe .ayjnt/assets (stale bundles would ship to production otherwise)
-//  10. For each agent with app.tsx:
-//        bundle app.tsx → .ayjnt/assets/__ayjnt/<route-flat>/app.js
-//        write HTML     → .ayjnt/assets/__ayjnt/<route-flat>/index.html
-//  11. generateEntry (with assetRoutes map) → .ayjnt/dist/entry.ts
-//  12. generateWrangler (with hasApps flag) → .ayjnt/dist/wrangler.jsonc
+// Ordering principle: do all FALLIBLE work (scanning, parsing, bundling)
+// before any DESTRUCTIVE work (wiping directories), and commit the
+// migration lockfile LAST — a build that dies halfway must not leave a
+// staged migration for code that was never generated.
+//
+// Steps:
+//   1. scan(root)                       → Manifest
+//   2. readLockfile + diffMigrations    → MigrationDiff (nothing written yet)
+//   3. write tsconfig / env.d.ts / per-agent hooks into a FRESH .ayjnt/client
+//      (wiped first — stale hooks for renamed/deleted agents would keep
+//      old @ayjnt/<route> imports compiling and silently target dead routes)
+//   4. bundle every app.tsx into memory (the most failure-prone step —
+//      nothing destructive has happened to the assets tree yet)
+//   5. wipe .ayjnt/assets/__ayjnt and write the bundles + HTML shells
+//   6. generateEntry  → .ayjnt/dist/entry.ts
+//   7. generateWrangler → .ayjnt/dist/wrangler.jsonc
+//   8. syncDevVars (wrangler resolves .dev.vars against the config dir)
+//   9. write the lockfile (build/dev only — deploy verifies it's committed)
 
 import {
   copyFileSync,
@@ -42,10 +41,12 @@ import {
   generateMountEntry,
   generateTsconfig,
   hasDefaultExport,
+  type BundledApp,
 } from "../codegen/client.ts";
 import { generateEntry } from "../codegen/entry.ts";
 import {
   applyDiff,
+  diffChangesLockfile,
   diffMigrations,
   formatDiff,
   readLockfile,
@@ -53,6 +54,7 @@ import {
 } from "../codegen/migrations.ts";
 import { scan } from "../codegen/scan.ts";
 import { deriveWorkerName, generateWrangler } from "../codegen/wrangler.ts";
+import type { AgentEntry, Manifest } from "../core/types.ts";
 import { parseArgs } from "./util.ts";
 
 export type RunBuildOptions = {
@@ -61,6 +63,14 @@ export type RunBuildOptions = {
    *  false so the lockfile is never written during deploy (it must already
    *  be committed). */
   writeLockfile?: boolean;
+  /** Don't auto-stage DELETIONS into the lockfile; warn instead. `ayjnt dev`
+   *  sets this: its watcher rebuilds on every fs event, and a folder rename
+   *  that reaches the differ in two builds (create-new-then-delete-old
+   *  editors, a pause mid-rename, a transient state during git checkout)
+   *  would otherwise stage deleted_classes in build N and new_sqlite_classes
+   *  in build N+1 — two append-only entries that destroy the class's
+   *  storage on deploy. Deletions stage only via an explicit `ayjnt build`. */
+  deferDeletions?: boolean;
   /** If false, suppress console output. Tests. */
   quiet?: boolean;
 };
@@ -70,7 +80,8 @@ export type BuildResult = {
   wranglerPath: string;
   /** .ayjnt/dist/entry.ts (absolute). */
   entryPath: string;
-  /** True if a new migration was staged during this build. */
+  /** True if this build changes the lockfile (a new migration entry, or a
+   *  folder move's re-keyed bookkeeping). */
   staged: boolean;
   /** Count of agents in the emitted manifest. */
   agentCount: number;
@@ -88,88 +99,64 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     if (!quiet) console.log(msg);
   };
 
-  // 1-5: manifest + migrations
+  // 1-2: manifest + migration diff (computed now, written at the very end).
   const manifest = await scan(cwd);
   const priorLock = await readLockfile(cwd);
   const diff = diffMigrations(priorLock, manifest);
   const finalLock = applyDiff(priorLock, diff);
-
-  if (diff.nextEntry) {
+  if (diffChangesLockfile(diff)) {
     log(formatDiff(diff));
-    if (shouldWrite) {
-      await writeLockfile(cwd, finalLock);
-      log("  → wrote .ayjnt/migrations.json");
-    }
   }
 
   const dotDir = path.join(cwd, ".ayjnt");
   const outDir = path.join(dotDir, "dist");
   const clientDir = path.join(dotDir, "client");
-  const assetsDir = path.join(dotDir, "assets");
-  const assetsScoped = path.join(assetsDir, "__ayjnt");
+  const assetsScoped = path.join(dotDir, "assets", "__ayjnt");
+
+  // 3: client tree. Wiped first — it is fully regenerated below, and a
+  // stale hook for a renamed/deleted agent would keep the user's old
+  // `@ayjnt/<route>` import compiling against a route the worker no
+  // longer serves.
+  rmSync(clientDir, { recursive: true, force: true });
   for (const dir of [dotDir, outDir, clientDir]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   }
 
-  // Wrangler resolves `.dev.vars` relative to the directory containing
-  // wrangler.jsonc (configDir), not its cwd. Our generated config lives
-  // in .ayjnt/dist/, so without this sync wrangler never sees the user's
-  // project-root .dev.vars. Mirror every .dev.vars{,.<env>} into outDir.
-  syncDevVars(cwd, outDir, log);
-
-  // 6: path-alias tsconfig (always the same content, but regenerated so
-  //    users can't drift by editing it).
   await Bun.write(path.join(dotDir, "tsconfig.json"), generateTsconfig());
 
-  // 7: GeneratedEnv type
   const envPath = path.join(dotDir, "env.d.ts");
   await Bun.write(envPath, generateEnvTypes(manifest, envPath));
 
-  // 8: per-agent typed useAgent hooks. Must happen BEFORE bundling so the
-  //    @ayjnt/<route> imports in user app.tsx resolve.
+  // Per-agent typed useAgent hooks. Must exist on disk BEFORE bundling so
+  // the @ayjnt/<route> imports in user app.tsx resolve.
   for (const agent of manifest.agents) {
     const hookPath = path.join(dotDir, clientFileFor(agent));
-    const hookDir = path.dirname(hookPath);
-    if (!existsSync(hookDir)) mkdirSync(hookDir, { recursive: true });
+    mkdirSync(path.dirname(hookPath), { recursive: true });
     await Bun.write(hookPath, generateClientHook(agent, hookPath));
   }
 
-  // 9: wipe the scoped assets tree so renamed/removed agents don't leave
-  //    stale bundles behind (those would still ship to production via
-  //    wrangler's assets upload).
-  if (existsSync(assetsScoped)) {
-    rmSync(assetsScoped, { recursive: true, force: true });
-  }
-
-  // 10: bundle + write assets for every agent that has an app.tsx.
-  //     assetRoutes maps each binding → flat route segment so the
-  //     generated entry.ts knows which asset path to fetch when serving
-  //     HTML for that agent.
-  //
-  //     New in v0.5: if app.tsx exports a default React component, we
-  //     generate a mount wrapper at .ayjnt/client/<route>/mount.tsx and
-  //     bundle THAT instead of the user file. The wrapper owns
-  //     createRoot + StrictMode + error boundary, so users never write
-  //     mount boilerplate. If app.tsx has no default export we assume
-  //     the legacy manual-mount pattern and bundle it directly, with a
-  //     deprecation warning.
-  const assetRoutes: Record<string, string> = {};
-  let appCount = 0;
+  // 4: bundle every app.tsx into memory. If any bundle fails, the assets
+  // tree from the previous successful build is still intact.
+  assertUniqueAssetRoutes(manifest);
+  const bundles: {
+    agent: AgentEntry;
+    flat: string;
+    bundle: BundledApp;
+  }[] = [];
   for (const agent of manifest.agents) {
     if (!agent.hasApp) continue;
-    const flat = flattenRoute(agent.routePath);
-    const perRouteDir = path.join(assetsScoped, flat);
-    mkdirSync(perRouteDir, { recursive: true });
-
     const userAppPath = path.join(path.dirname(agent.sourceFile), "app.tsx");
     const source = await Bun.file(userAppPath).text();
 
+    // If app.tsx exports a default React component, we generate a mount
+    // wrapper at .ayjnt/client/<route>/mount.tsx and bundle THAT instead.
+    // The wrapper owns createRoot + StrictMode + error boundary, so users
+    // never write mount boilerplate. No default export = the legacy
+    // manual-mount pattern; bundle it directly with a deprecation warning.
     let bundleEntry: string;
     if (hasDefaultExport(source)) {
-      // Generated mount wrapper lives next to the typed useAgent hook
-      // so both sit in the same client subtree.
       const mountDir = path.join(dotDir, clientDirFor(agent));
-      if (!existsSync(mountDir)) mkdirSync(mountDir, { recursive: true });
+      mkdirSync(mountDir, { recursive: true });
       const mountPath = path.join(mountDir, "mount.tsx");
       const appImportPath = path
         .relative(path.dirname(mountPath), userAppPath)
@@ -189,28 +176,43 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
       bundleEntry = userAppPath;
     }
 
-    const bundledJs = await bundleApp({
-      appEntry: bundleEntry,
-      projectRoot: cwd,
+    bundles.push({
+      agent,
+      flat: flattenRoute(agent.routePath),
+      bundle: await bundleApp({ appEntry: bundleEntry, projectRoot: cwd }),
     });
-    await Bun.write(path.join(perRouteDir, "app.js"), bundledJs);
+  }
+
+  // 5: wipe the scoped assets tree and write the fresh bundles. The wipe
+  // happens only now, after every bundle succeeded.
+  rmSync(assetsScoped, { recursive: true, force: true });
+  const assetRoutes: Record<string, string> = {};
+  for (const { agent, flat, bundle } of bundles) {
+    const perRouteDir = path.join(assetsScoped, flat);
+    mkdirSync(perRouteDir, { recursive: true });
+    await Bun.write(path.join(perRouteDir, "app.js"), bundle.entryJs);
+    // Sibling outputs: CSS, hashed images/fonts, split chunks. The entry
+    // references them by ./basename, so they live flat next to app.js.
+    for (const extra of bundle.extras) {
+      await Bun.write(path.join(perRouteDir, extra.fileName), extra.bytes);
+    }
     await Bun.write(
       path.join(perRouteDir, "index.html"),
       generateHtmlShell({
         title: agent.className,
         scriptSrc: `/__ayjnt/${flat}/app.js`,
+        styleSrcs: bundle.styles.map((name) => `/__ayjnt/${flat}/${name}`),
       }),
     );
     assetRoutes[agent.binding] = flat;
-    appCount++;
   }
+  const appCount = bundles.length;
 
-  // 11-12: worker entry + wrangler config
+  // 6-7: worker entry + wrangler config.
   //
   // docs.md content is loaded once per agent and inlined as a string literal
   // in the generated entry so the worker can serve it from <route>/docs
-  // without requiring an extra binding (Assets is optional). The catalog
-  // endpoint uses each agent's hasDocs flag to expose the docsUrl.
+  // without requiring an extra binding (Assets is optional).
   const entryPath = path.join(outDir, "entry.ts");
   const wranglerPath = path.join(outDir, "wrangler.jsonc");
 
@@ -232,7 +234,7 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     }),
   );
 
-  const name = await resolveWorkerName(cwd);
+  const name = await resolveWorkerName(cwd, log);
   // AYJNT_COMPATIBILITY_DATE lets users override the framework's pinned
   // default without forking — useful when they upgrade their wrangler
   // independently of ayjnt and want to opt into newer runtime behaviour.
@@ -246,6 +248,27 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     }),
   );
 
+  // 8: wrangler resolves `.dev.vars` relative to the directory containing
+  // wrangler.jsonc (configDir), not its cwd. Our generated config lives
+  // in .ayjnt/dist/, so without this sync wrangler never sees the user's
+  // project-root .dev.vars.
+  syncDevVars(cwd, outDir, log);
+
+  // 9: only now, with every artifact written, commit the lockfile.
+  const staged = diffChangesLockfile(diff);
+  if (staged && shouldWrite) {
+    if (opts.deferDeletions && diff.deleted.length > 0) {
+      log(
+        `⚠ ayjnt: ${diff.deleted.map((d) => d.className).join(", ")} disappeared from agents/ — ` +
+          `NOT staging the deletion (storage would be destroyed on deploy). ` +
+          `If the removal is intentional, run \`ayjnt build\` to stage it.`,
+      );
+    } else {
+      await writeLockfile(cwd, finalLock);
+      log("  → wrote .ayjnt/migrations.json");
+    }
+  }
+
   const appSuffix = appCount ? `, ${appCount} with UI` : "";
   const docsSuffix = docsCount ? `, ${docsCount} with docs` : "";
   log(
@@ -255,25 +278,68 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   return {
     wranglerPath,
     entryPath,
-    staged: !!diff.nextEntry,
+    staged,
     agentCount: manifest.agents.length,
     appCount,
     docsCount,
   };
 }
 
-async function resolveWorkerName(cwd: string): Promise<string> {
-  const pkgPath = path.join(cwd, "package.json");
-  if (!existsSync(pkgPath)) return "worker";
-  try {
-    const pkg = (await Bun.file(pkgPath).json()) as { name?: string };
-    if (typeof pkg.name === "string" && pkg.name.length > 0) {
-      return deriveWorkerName(pkg.name);
+/**
+ * flattenRoute maps "/" to "_": "/admin/users" → "admin_users" — which
+ * collides with a literal "/admin_users" route. Rare, but the collision
+ * would silently serve one agent's UI bundle for both routes, so reject
+ * it with the pair spelled out.
+ */
+function assertUniqueAssetRoutes(manifest: Manifest): void {
+  const byFlat = new Map<string, AgentEntry>();
+  for (const agent of manifest.agents) {
+    if (!agent.hasApp) continue;
+    const flat = flattenRoute(agent.routePath);
+    const prior = byFlat.get(flat);
+    if (prior) {
+      throw new Error(
+        `Routes ${prior.routePath} and ${agent.routePath} both flatten to the ` +
+          `asset segment "${flat}" — their UI bundles would overwrite each other. ` +
+          `Rename one of the folders.`,
+      );
     }
-  } catch {
-    // fall through
+    byFlat.set(flat, agent);
   }
-  return "worker";
+}
+
+/**
+ * Worker name resolution: package.json "name" → sanitized; falls back to
+ * the project directory's name, then a fixed default, when the package
+ * name sanitizes to nothing (e.g. a non-Latin name). The fallback is
+ * logged — a silently-defaulted name could clobber an unrelated worker
+ * on deploy.
+ */
+async function resolveWorkerName(
+  cwd: string,
+  log: (msg: string) => void,
+): Promise<string> {
+  const pkgPath = path.join(cwd, "package.json");
+  let fromPkg = "";
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = (await Bun.file(pkgPath).json()) as { name?: string };
+      if (typeof pkg.name === "string") {
+        fromPkg = deriveWorkerName(pkg.name);
+      }
+    } catch {
+      // unparseable package.json — fall through to the directory name
+    }
+  }
+  if (fromPkg) return fromPkg;
+
+  const fromDir = deriveWorkerName(path.basename(cwd));
+  const name = fromDir || "ayjnt-worker";
+  log(
+    `⚠ ayjnt: package.json has no usable "name" — deploying as worker "${name}". ` +
+      `Set "name" in package.json to control this.`,
+  );
+  return name;
 }
 
 export async function build(argv: string[]): Promise<void> {

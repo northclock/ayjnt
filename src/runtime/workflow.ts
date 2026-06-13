@@ -13,7 +13,7 @@
 //   import type OrdersProcessing from "./workflow.ts";
 //
 //   export default class OrdersAgent
-//     extends withWorkflow<typeof OrdersProcessing>(Agent)<GeneratedEnv, State>
+//     extends withWorkflow<typeof OrdersProcessing>()(Agent)<GeneratedEnv, State>
 //   {
 //     async placeOrder(req: OrderRequest) {
 //       const id = await this.workflow({           // ← typed against
@@ -29,7 +29,7 @@
 // `Params` into the method signature — IntelliSense knows exactly what
 // shape `this.workflow(...)` accepts.
 //
-// At runtime, `withWorkflow(Agent)` returns a subclass with a single
+// At runtime, `withWorkflow<W>()(Agent)` returns a subclass with a single
 // `workflow(params)` method. The method reads `this.__ayjntWorkflowBinding`
 // — a hidden prototype property the codegen patches onto the agent class
 // in `.ayjnt/dist/entry.ts` based on the scan-time pairing. The user
@@ -46,10 +46,18 @@ import type { AgentWorkflow } from "agents/workflows";
  *
  * `AgentWorkflow<AgentType, Params, ProgressType, Env>` → `Params`.
  * Falls back to `unknown` if the workflow class isn't parameterized.
+ *
+ * Every non-target slot uses `infer _` rather than a fixed type:
+ *   - `never` made the extends check FAIL for every real subclass
+ *     (AgentType/Env sit in covariant positions), silently degrading
+ *     params to `unknown` — the typo-catching the mixin advertises
+ *     never actually worked.
+ *   - `any` instantiates `DurableObjectStub<any>` inside the upstream
+ *     type and blows up with TS2589 under the pinned workers-types.
  */
 export type WorkflowParams<W> = W extends abstract new (
   ...args: never
-) => AgentWorkflow<never, infer P, never, never>
+) => AgentWorkflow<infer _AgentType, infer P, infer _Progress, infer _Env>
   ? P
   : unknown;
 
@@ -109,7 +117,7 @@ export type WorkflowMixinReturn<TBase extends Constructor, W> = TBase &
  * import type OrdersProcessing from "./workflow.ts";
  *
  * export default class OrdersAgent
- *   extends withWorkflow<typeof OrdersProcessing>(Agent)<GeneratedEnv, State>
+ *   extends withWorkflow<typeof OrdersProcessing>()(Agent)<GeneratedEnv, State>
  * {
  *   async placeOrder(req: OrderRequest) {
  *     const workflowId = await this.workflow({

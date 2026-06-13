@@ -108,14 +108,21 @@ describe("generateClientHook", () => {
     const out = generateClientHook(agent({}), "/fake/.ayjnt/client/chat/index.tsx");
     // Import from the generated location to the agent source
     expect(out).toContain(
-      `import type ChatAgent from "../../../agents/chat/agent.ts";`,
+      `import type __AyjntAgentClass from "../../../agents/chat/agent.ts";`,
     );
-    // basePath = route without leading slash
-    expect(out).toContain(`basePath: "chat" + "/" + instanceName`);
+    // The class is still re-exported under its REAL name for consumers.
+    expect(out).toContain(
+      `export type { default as ChatAgent } from "../../../agents/chat/agent.ts";`,
+    );
+    // basePath = route without leading slash; the derived (DECODED)
+    // instance name is re-encoded so "/", "?", "#" can't be re-parsed as
+    // URL structure and bind the UI to the wrong DO.
+    expect(out).toContain(`basePath: "chat" + "/" + encodeURIComponent(instanceName)`);
     // agent field = class name
     expect(out).toContain(`agent: "ChatAgent"`);
-    // deriveInstance uses route prefix
-    expect(out).toContain(`const prefix = "/chat";`);
+    // deriveInstance matches decoded segments against the route prefix
+    expect(out).toContain(`const prefix: string[] = ["chat"];`);
+    expect(out).toContain("decodeURIComponent");
   });
 
   test("nested route hook", () => {
@@ -128,17 +135,17 @@ describe("generateClientHook", () => {
       }),
       "/fake/.ayjnt/client/admin/users/index.tsx",
     );
-    expect(out).toContain(`basePath: "admin/users" + "/" + instanceName`);
-    expect(out).toContain(`const prefix = "/admin/users";`);
+    expect(out).toContain(`basePath: "admin/users" + "/" + encodeURIComponent(instanceName)`);
+    expect(out).toContain(`const prefix: string[] = ["admin","users"];`);
     expect(out).toContain(
-      `import type AdminUsersAgent from "../../../../agents/admin/users/agent.ts";`,
+      `import type __AyjntAgentClass from "../../../../agents/admin/users/agent.ts";`,
     );
   });
 
   test("state type inferred from agent class", () => {
     const out = generateClientHook(agent({}), "/fake/.ayjnt/client/chat/index.tsx");
     expect(out).toContain(
-      "type AgentState = Instance extends { state: infer S } ? S : unknown;",
+      "type __AyjntState = __AyjntInstance extends { state: infer S } ? S : unknown;",
     );
   });
 
@@ -156,9 +163,9 @@ describe("generateClientHook", () => {
     // different State types" diagnostic — concrete types resolve cleanly,
     // open generics don't.
     const out = generateClientHook(agent({}), "/fake/.ayjnt/client/chat/index.tsx");
-    expect(out).toContain("useAgentUpstream<Instance, AgentState>");
+    expect(out).toContain("__ayjntUseAgentUpstream<__AyjntInstance, __AyjntState>");
     expect(out).toContain(
-      "ReturnType<typeof useAgentUpstream<Instance, AgentState>>",
+      "ReturnType<typeof __ayjntUseAgentUpstream<__AyjntInstance, __AyjntState>>",
     );
     // No State generic on the wrapper itself — bare useAgent() call.
     expect(out).toMatch(/export function useAgent\(\s*options/);
@@ -352,5 +359,89 @@ describe("generateMountEntry", () => {
       appImportPath: "./app.tsx",
     });
     expect(out).toContain(`import App from "./app.tsx";`);
+  });
+});
+
+describe("generateHtmlShell styleSrcs", () => {
+  test("emits a <link rel=stylesheet> per style, before </head>", () => {
+    const out = generateHtmlShell({
+      title: "Chat",
+      scriptSrc: "/__ayjnt/chat/app.js",
+      styleSrcs: ["/__ayjnt/chat/mount-abc123.css"],
+    });
+    const link = '<link rel="stylesheet" href="/__ayjnt/chat/mount-abc123.css">';
+    expect(out).toContain(link);
+    expect(out.indexOf(link)).toBeLessThan(out.indexOf("</head>"));
+  });
+
+  test("style hrefs are HTML-escaped", () => {
+    const out = generateHtmlShell({
+      title: "x",
+      scriptSrc: "/app.js",
+      styleSrcs: ['/__ayjnt/x/a"b.css'],
+    });
+    expect(out).toContain('href="/__ayjnt/x/a&quot;b.css"');
+  });
+
+  test("no styleSrcs → no link tags (back-compat)", () => {
+    const out = generateHtmlShell({ title: "x", scriptSrc: "/app.js" });
+    expect(out).not.toContain("<link");
+  });
+});
+
+// bundleApp integration — the original bug: `import "./styles.css"` produced
+// a second build output that was silently dropped (page rendered unstyled),
+// and asset imports referenced files that were never written.
+import { mkdtempSync as mkdtemp2, rmSync as rm2, mkdirSync as mkdir2 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import * as path from "node:path";
+import { bundleApp } from "./client.ts";
+
+describe("bundleApp outputs", () => {
+  test("returns CSS and asset outputs alongside the entry, flat-named", async () => {
+    const proj = mkdtemp2(path.join(tmpdir2(), "ayjnt-bundle-"));
+    mkdir2(path.join(proj, "app"), { recursive: true });
+    await Bun.write(path.join(proj, "app/styles.css"), "body { margin: 0; }");
+    // a tiny binary "image" exercised through Bun's file loader
+    await Bun.write(path.join(proj, "app/logo.png"), new Uint8Array([137, 80, 78, 71]));
+    await Bun.write(
+      path.join(proj, "app/entry.ts"),
+      `import "./styles.css";
+import logo from "./logo.png";
+console.log(logo);
+export default function App() { return null; }
+`,
+    );
+
+    const bundle = await bundleApp({
+      appEntry: path.join(proj, "app/entry.ts"),
+      projectRoot: proj,
+    });
+
+    expect(bundle.entryJs.length).toBeGreaterThan(0);
+    expect(bundle.styles).toHaveLength(1);
+    expect(bundle.styles[0]).toMatch(/\.css$/);
+    const names = bundle.extras.map((e) => e.fileName);
+    expect(names).toContain(bundle.styles[0]!);
+    expect(names.some((n) => n.endsWith(".png"))).toBe(true);
+    // Flat naming: no path separators — every output sits beside app.js so
+    // the JS's "./<name>" references resolve under /__ayjnt/<flat>/.
+    for (const n of names) expect(n).not.toContain("/");
+    const pngName = names.find((n) => n.endsWith(".png"))!;
+    expect(bundle.entryJs).toContain(pngName);
+
+    rm2(proj, { recursive: true, force: true });
+  });
+
+  test("a resolve failure surfaces the failing import, not an opaque AggregateError", async () => {
+    const proj = mkdtemp2(path.join(tmpdir2(), "ayjnt-bundlefail-"));
+    await Bun.write(
+      path.join(proj, "entry.ts"),
+      `import "this-package-does-not-exist";`,
+    );
+    expect(
+      bundleApp({ appEntry: path.join(proj, "entry.ts"), projectRoot: proj }),
+    ).rejects.toThrow(/this-package-does-not-exist/);
+    rm2(proj, { recursive: true, force: true });
   });
 });

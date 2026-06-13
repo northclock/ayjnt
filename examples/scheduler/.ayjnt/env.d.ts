@@ -3,7 +3,10 @@ import type CarbonAgent from "../agents/carbon/agent.ts";
 import type RemindersAgent from "../agents/reminders/agent.ts";
 
 /**
- * Every Durable Object binding derived from the file tree under agents/.
+ * Every Durable Object binding derived from the file tree under agents/,
+ * plus any feature-flag-derived bindings (BROWSER, LOADER, AI, etc.) the
+ * codegen added because of imports it detected.
+ *
  * Extend this with your own wrangler bindings (KV, R2, vars):
  *
  *   import type { GeneratedEnv } from "@ayjnt/env";

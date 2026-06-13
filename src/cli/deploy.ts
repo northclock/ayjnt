@@ -28,7 +28,7 @@ export async function deploy(argv: string[]): Promise<void> {
   if (result.staged && !force) {
     throw new Error(
       [
-        "pending migration detected — not yet committed to .ayjnt/migrations.json.",
+        "pending lockfile change (migration or folder move) — not yet committed to .ayjnt/migrations.json.",
         "Run `ayjnt build` to stage it, then `git add .ayjnt/migrations.json && git commit && git push` before deploying.",
         "Use --force to deploy anyway (not recommended — risks divergent migrations across deploys).",
       ].join("\n"),
@@ -78,6 +78,17 @@ function assertGitReady(cwd: string): void {
   const branchRes = git(["rev-parse", "--abbrev-ref", "HEAD"]);
   if (branchRes.status !== 0) return;
   const branch = branchRes.stdout.trim();
+
+  // Detached HEAD: `--abbrev-ref` returns the literal "HEAD", and comparing
+  // against `origin/HEAD` (which usually exists as a symbolic ref) would
+  // produce bogus ahead/behind counts and misleading errors. Same degraded
+  // path as a missing remote: warn and let the clean-tree check stand alone.
+  if (branch === "HEAD") {
+    console.warn(
+      "warning: detached HEAD — skipping remote sync check. Make sure this commit is pushed before deploying.",
+    );
+    return;
+  }
 
   const remoteCheck = git(["rev-parse", "--verify", `origin/${branch}`]);
   if (remoteCheck.status !== 0) {

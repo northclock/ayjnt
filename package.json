@@ -1,6 +1,6 @@
 {
   "name": "ayjnt",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Agent-first framework for Cloudflare. No worker boilerplate, no wrangler wrestling.",
   "type": "module",
   "bin": {
@@ -24,6 +24,12 @@
       "types": "./dist/middleware.d.ts",
       "import": "./dist/middleware.js",
       "default": "./dist/middleware.js"
+    },
+    "./router": {
+      "bun": "./src/runtime/router.ts",
+      "types": "./dist/router.d.ts",
+      "import": "./dist/router.js",
+      "default": "./dist/router.js"
     },
     "./browser": {
       "bun": "./src/runtime/browser.ts",
@@ -53,8 +59,10 @@
   "scripts": {
     "ayjnt": "bun run bin/ayjnt.ts",
     "test": "bun test",
+    "dev:temp": "bun run scripts/dev-temp.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "bunup && bun scripts/postbuild.ts",
-    "prepublishOnly": "bun run test && bun run build",
+    "prepublishOnly": "bun run test && bun run typecheck && bun run build",
     "publish:dry": "bun publish --dry-run",
     "release": "bun publish"
   },
@@ -83,7 +91,8 @@
     "@types/bun": "latest",
     "@types/react": "^19.2.15",
     "agents": "^0.13.1",
-    "bunup": "^0.16.31"
+    "bunup": "^0.16.31",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "bun": ">=1.1.0"

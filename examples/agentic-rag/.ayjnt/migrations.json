@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-06-12T04:28:04.353Z",
+      "new_sqlite_classes": [
+        "IndexAgent",
+        "QAAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "index": {
+      "agentId": "index",
+      "className": "IndexAgent",
+      "firstTag": "v1"
+    },
+    "qa": {
+      "agentId": "qa",
+      "className": "QAAgent",
+      "firstTag": "v1"
+    }
+  }
+}

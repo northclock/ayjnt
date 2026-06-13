@@ -76,13 +76,21 @@ describe("generateWrangler", () => {
     expect(cfg["durable_objects"]).toEqual({
       bindings: [{ name: "CHAT_AGENT", class_name: "ChatAgent" }],
     });
+    // `timestamp` is lockfile bookkeeping — wrangler's migration schema
+    // rejects unknown fields with a warning, so it must NOT be emitted.
     expect(cfg["migrations"]).toEqual([
       {
         tag: "v1",
-        timestamp: "2026-04-14T00:00:00Z",
         new_sqlite_classes: ["ChatAgent"],
       },
     ]);
+  });
+
+  test("$schema resolves from .ayjnt/dist/ back to the project's node_modules", () => {
+    const out = generateWrangler(mf([agent({})]), lockfile, { name: "x" });
+    expect(parse(out)["$schema"]).toBe(
+      "../../node_modules/wrangler/config-schema.json",
+    );
   });
 
   test("no duplicate nodejs_compat when user adds it", () => {

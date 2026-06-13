@@ -106,6 +106,67 @@ describe("compose", () => {
       compose([mw], dummyCtx(), async () => new Response()),
     ).rejects.toThrow(/next\(\) called multiple times/);
   });
+
+  test("await next() without return passes the inner response through (Hono semantics)", async () => {
+    const mw: Middleware = async (_c, next) => {
+      await next();
+    };
+    const res = await compose([mw], dummyCtx(), async () =>
+      new Response("inner", { status: 201 }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.text()).toBe("inner");
+  });
+
+  test("pass-through works at every depth of the chain", async () => {
+    const passThrough: Middleware = async (_c, next) => {
+      await next();
+    };
+    const res = await compose(
+      [passThrough, passThrough, passThrough],
+      dummyCtx(),
+      async () => new Response("deep"),
+    );
+    expect(await res.text()).toBe("deep");
+  });
+
+  test("returning a Response after next() still overrides the inner one", async () => {
+    const mw: Middleware = async (_c, next) => {
+      await next();
+      return new Response("override");
+    };
+    const res = await compose([mw], dummyCtx(), async () =>
+      new Response("inner"),
+    );
+    expect(await res.text()).toBe("override");
+  });
+
+  test("middleware that neither returns nor calls next() throws a descriptive error", async () => {
+    const broken: Middleware = async () => {
+      // forgot to return a Response or call next()
+    };
+    await expect(
+      compose([broken], dummyCtx(), async () => new Response()),
+    ).rejects.toThrow(/middleware\[0\] returned nothing and never called next\(\)/);
+  });
+
+  test("un-awaited next() gets its own diagnostic, not 'never called next()'", async () => {
+    const dropped: Middleware = (_c, next) => {
+      void next(); // fired but the promise is dropped
+    };
+    await expect(
+      compose([dropped], dummyCtx(), async () => new Response()),
+    ).rejects.toThrow(/called next\(\) without awaiting it/);
+  });
+
+  test("errors thrown by a middleware propagate to the caller", async () => {
+    const thrower: Middleware = async () => {
+      throw new Error("boom");
+    };
+    await expect(
+      compose([thrower], dummyCtx(), async () => new Response()),
+    ).rejects.toThrow("boom");
+  });
 });
 
 describe("createContext", () => {
@@ -119,6 +180,36 @@ describe("createContext", () => {
 
     const html = c.html("<h1>hi</h1>");
     expect(html.headers.get("content-type")).toMatch(/text\/html/);
+  });
+
+  test("custom headers survive in every HeadersInit form", () => {
+    const c = dummyCtx();
+
+    // plain record
+    const a = c.text("x", { headers: { "x-custom": "1" } });
+    expect(a.headers.get("x-custom")).toBe("1");
+    expect(a.headers.get("content-type")).toMatch(/text\/plain/);
+
+    // Headers instance — spread-merging would silently drop these
+    const b = c.text("x", {
+      status: 401,
+      headers: new Headers({ "www-authenticate": "Bearer" }),
+    });
+    expect(b.status).toBe(401);
+    expect(b.headers.get("www-authenticate")).toBe("Bearer");
+    expect(b.headers.get("content-type")).toMatch(/text\/plain/);
+
+    // tuple array
+    const d = c.html("x", { headers: [["x-arr", "2"]] });
+    expect(d.headers.get("x-arr")).toBe("2");
+    expect(d.headers.get("0")).toBeNull();
+    expect(d.headers.get("content-type")).toMatch(/text\/html/);
+  });
+
+  test("caller-supplied content-type overrides the default", () => {
+    const c = dummyCtx();
+    const r = c.text("x", { headers: { "content-type": "text/csv" } });
+    expect(r.headers.get("content-type")).toBe("text/csv");
   });
 
   test("redirect defaults to 302 with location header", () => {

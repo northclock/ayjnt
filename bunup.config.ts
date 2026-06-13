@@ -38,6 +38,7 @@ export default defineConfig([
       "src/runtime/index.ts",
       "src/runtime/rpc.ts",
       "src/runtime/middleware.ts",
+      "src/runtime/router.ts",
       "src/runtime/browser.ts",
       "src/runtime/voiceClient.tsx",
       "src/runtime/workflow.ts",

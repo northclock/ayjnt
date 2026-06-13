@@ -12,10 +12,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["@types/react"],
+    "types": ["bun", "@types/react"],
     "jsx": "react-jsx",
     "jsxImportSource": "react"
   },
-  "include": ["src/runtime/voiceClient.tsx"],
+  "include": ["src/runtime/voiceClient.tsx", "src/runtime/voiceClient.test.ts"],
   "exclude": ["node_modules", "examples", ".ayjnt", "**/.ayjnt/**"]
 }
