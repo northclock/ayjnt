@@ -1007,3 +1007,69 @@ describe("resolveMiddlewareChain boundary", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+describe("root app (agents/app.tsx)", () => {
+  test("detected, carrying the root middleware chain", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-rootapp-"));
+    await mkdir(path.join(tmp, "agents/chat"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/chat/agent.ts"),
+      `export default class ChatAgent extends Agent {}`,
+    );
+    await writeFile(
+      path.join(tmp, "agents/middleware.ts"),
+      `export default async (c: any, next: any) => next();`,
+    );
+    await writeFile(
+      path.join(tmp, "agents/app.tsx"),
+      `export default function Home() { return null; }`,
+    );
+
+    const m = await scan(tmp);
+    expect(m.rootApp).not.toBeNull();
+    expect(m.rootApp!.sourceFile.endsWith("agents/app.tsx")).toBe(true);
+    expect(m.rootApp!.middlewareChain).toHaveLength(1); // the root middleware
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("a root app with no root middleware has an empty chain", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-rootapp2-"));
+    await mkdir(path.join(tmp, "agents/chat"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/chat/agent.ts"),
+      `export default class ChatAgent extends Agent {}`,
+    );
+    await writeFile(
+      path.join(tmp, "agents/app.tsx"),
+      `export default function Home() { return null; }`,
+    );
+    const m = await scan(tmp);
+    expect(m.rootApp!.middlewareChain).toEqual([]);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("absent when there is no agents/app.tsx", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-norootapp-"));
+    await mkdir(path.join(tmp, "agents/chat"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/chat/agent.ts"),
+      `export default class ChatAgent extends Agent {}`,
+    );
+    const m = await scan(tmp);
+    expect(m.rootApp ?? null).toBeNull();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("a home-only project (root app, zero agents) still resolves the root app", async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "ayjnt-homeonly-"));
+    await mkdir(path.join(tmp, "agents"), { recursive: true });
+    await writeFile(
+      path.join(tmp, "agents/app.tsx"),
+      `export default function Home() { return null; }`,
+    );
+    const m = await scan(tmp);
+    expect(m.agents).toEqual([]);
+    expect(m.rootApp).not.toBeNull();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});

@@ -115,6 +115,18 @@ export type WorkflowEntry = {
   baseClass: string;
 };
 
+/** Optional root-level UI :)
+ * `agents/app.tsx` - a home page served at `/`
+ * gated gy the root middlewareChain. Sibling to ` agents/middleware.ts`
+ */
+export type RootApp = {
+  //** Absolute path to `agents/app.tsx`
+  sourceFile: string;
+  /** Root middleware chain (root → leaf), same shape as
+   *  AgentEntry.middlewareChain. The `/` UI runs through it. */
+  middlewareChain: string[];
+};
+
 /** The full scan result. One per project. */
 export type Manifest = {
   /** Project root (absolute). */
@@ -125,6 +137,8 @@ export type Manifest = {
   workflows: WorkflowEntry[];
   /** Feature opt-ins detected from agent source — see {@link FeatureFlags}. */
   features: FeatureFlags;
+  /** Root-level home UI, or null when there's no agent/app.tsx */
+  rootApp?: RootApp | null;
 };
 
 /** Committed to git at .ayjnt/migrations.json. Source of truth for what is in prod. */

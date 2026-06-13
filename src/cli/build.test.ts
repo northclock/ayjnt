@@ -307,3 +307,69 @@ document.body.appendChild(document.createElement("div"));`,
     rmSync(proj, { recursive: true, force: true });
   });
 });
+
+describe("runBuild root home app", () => {
+  test("agents/app.tsx produces a __home asset, ASSETS config, and HOME_APP entry", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-home-"));
+    await mkdir(path.join(proj, "agents/chat"), { recursive: true });
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name: "home-test", type: "module" }),
+    );
+    await writeFile(
+      path.join(proj, "agents/chat/agent.ts"),
+      `export default class ChatAgent extends Agent {}`,
+    );
+    // Manual-mount (no default export) so bundling needs no React install —
+    // this test is about build wiring, not the mount wrapper.
+    await writeFile(
+      path.join(proj, "agents/app.tsx"),
+      `document.body.appendChild(document.createElement("main"));`,
+    );
+
+    await runBuild({ cwd: proj, quiet: true });
+
+    expect(
+      existsSync(path.join(proj, ".ayjnt/assets/__ayjnt/__home/index.html")),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(proj, ".ayjnt/assets/__ayjnt/__home/app.js")),
+    ).toBe(true);
+
+    const entry = readFileSync(path.join(proj, ".ayjnt/dist/entry.ts"), "utf8");
+    expect(entry).toContain('flat: "__home"');
+
+    const cfg = JSON.parse(
+      readFileSync(path.join(proj, ".ayjnt/dist/wrangler.jsonc"), "utf8")
+        .split("\n").slice(1).join("\n"),
+    );
+    expect(cfg.assets).toMatchObject({ binding: "ASSETS" });
+
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("an agent route flattening to __home is rejected", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-homeclash-"));
+    await mkdir(path.join(proj, "agents/__home"), { recursive: true });
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name: "clash", type: "module" }),
+    );
+    await writeFile(
+      path.join(proj, "agents/__home/agent.ts"),
+      `export default class HomeAgent extends Agent {}`,
+    );
+    await writeFile(
+      path.join(proj, "agents/__home/app.tsx"),
+      `document.body.appendChild(document.createElement("main"));`,
+    );
+    await writeFile(
+      path.join(proj, "agents/app.tsx"),
+      `document.body.appendChild(document.createElement("main"));`,
+    );
+    await expect(runBuild({ cwd: proj, quiet: true })).rejects.toThrow(
+      /reserved for the root agents\/app\.tsx/,
+    );
+    rmSync(proj, { recursive: true, force: true });
+  });
+});
