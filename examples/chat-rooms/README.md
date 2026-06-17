@@ -12,7 +12,7 @@ agents/
 ## Scaffold
 
 ```sh
-bunx ayjnt new my-chat --with-ui
+bunx ayjnt new my-chat
 cd my-chat
 rm -rf agents/counter
 mkdir -p agents/room

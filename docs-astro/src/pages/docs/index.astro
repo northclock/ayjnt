@@ -2,10 +2,10 @@
 import {
 	ArrowRight,
 	Cloud,
-	GitBranch,
-	Package,
 	Terminal as TerminalIcon,
 } from "lucide-react";
+import { GithubIcon } from "@/components/react/GithubIcon.tsx";
+import { NpmIcon } from "@/components/react/NpmIcon.tsx";
 import DocsLayout from "@/layouts/DocsLayout.astro";
 import Button from "@/components/Button.astro";
 import CodeBlock from "@/components/CodeBlock.astro";
@@ -22,7 +22,7 @@ const cloudflareRefs = [
 
 const quickStartSteps = [
 	{ n: 1, title: "Install Bun", sub: "ayjnt is Bun-first", command: "curl -fsSL https://bun.com/install | bash" },
-	{ n: 2, title: "Scaffold a project", sub: "Minimal or with React UI", command: "bunx ayjnt new my-app --with-ui" },
+	{ n: 2, title: "Scaffold a project", sub: "UI included; --empty for none", command: "bunx ayjnt new my-app" },
 	{ n: 3, title: "Install + dev", sub: "wrangler dev with live reload", command: "cd my-app && bun install && bun run dev" },
 	{ n: 4, title: "Deploy", sub: "Git preflight, then wrangler deploy", command: "bun run deploy" },
 ];
@@ -62,11 +62,11 @@ export default class CounterAgent extends Agent<GeneratedEnv, State> {
 					Start reading
 				</Button>
 				<Button href="https://github.com/northclock/ayjnt" variant="secondary" external>
-					<GitBranch className="h-4 w-4" />
+					<GithubIcon className="h-4 w-4" />
 					Source on GitHub
 				</Button>
 				<Button href="https://www.npmjs.com/package/ayjnt" variant="ghost" external>
-					<Package className="h-4 w-4" />
+					<NpmIcon className="h-4 w-4" />
 					ayjnt on npm
 				</Button>
 			</div>

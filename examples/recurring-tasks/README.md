@@ -13,7 +13,7 @@ client.ts      ← demo: start + poll + stop
 ## Scaffold
 
 ```sh
-bunx ayjnt new my-heartbeat --with-ui
+bunx ayjnt new my-heartbeat
 cd my-heartbeat
 rm -rf agents/counter
 mkdir -p agents/heartbeat

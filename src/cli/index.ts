@@ -8,7 +8,7 @@ const USAGE = `\
 ayjnt <command> [options]
 
 Commands:
-  new <dir>        Scaffold a new ayjnt project (--with-ui for a React starter)
+  new <dir>        Scaffold a new ayjnt project (UI included; --empty for none)
   dev              Start a local development server (wraps wrangler dev)
   build            Generate config + bundle, no deploy
   deploy           Build and deploy to Cloudflare (wraps wrangler deploy)

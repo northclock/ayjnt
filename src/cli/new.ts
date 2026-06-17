@@ -1,12 +1,13 @@
 // ayjnt new — scaffold a new project with a starter agent.
 //
-//   ayjnt new my-app              → blank starter (one "alive" agent, no UI)
-//   ayjnt new my-app --with-ui    → counter agent with co-located app.tsx
+//   ayjnt new my-app            → UI starter: a counter agent, its co-located
+//                                 page, and a root home page at "/"
+//   ayjnt new my-app --empty    → bare starter: one "alive" agent, no UI
 //
-// The default ("blank") is deliberately the smallest thing that proves the
-// pipeline works: one agent that responds "I'm alive" to any request. Every
-// example in /examples assumes you start from this scaffold, then replace
-// the alive/ folder with whatever the example demonstrates.
+// UI is included by default — most projects want a face. `--empty` is the
+// smallest thing that proves the pipeline works: one agent that responds
+// "I'm alive". Examples in /examples start from `--empty` and replace the
+// alive/ folder with their own agents.
 //
 // Inlines all template files as string constants so we don't need to ship
 // a templates/ directory on npm (and worry about file path resolution
@@ -19,12 +20,12 @@ import { fileURLToPath } from "node:url";
 const USAGE = `\
 ayjnt new <directory> [options]
 
-Scaffold a new ayjnt project.
+Scaffold a new ayjnt project. Includes a UI by default: a counter agent, its
+co-located page, and a root home page served at "/".
 
 Options:
-  --with-ui         Include a React UI using the co-located app.tsx pattern.
-                    Without this flag, scaffolds a blank starter project
-                    with a single "I'm alive" agent.
+  --empty           Skip the UI — scaffold a single bare "I'm alive" agent
+                    and no React. Good starting point for API-only agents.
   -h, --help        Show this help.
 
 Next steps after scaffolding:
@@ -33,24 +34,29 @@ Next steps after scaffolding:
   bun run dev
 `;
 
-type Template = "blank" | "with-ui";
+type Template = "ui" | "empty";
 
 export type NewArgs =
   | { kind: "help" }
   | { kind: "error"; message: string }
   | { kind: "scaffold"; targetDir: string; template: Template };
 
+// `--with-ui` used to opt INTO the UI; the UI is now the default, so the
+// flag is a no-op kept only so old scripts/docs don't hard-error. newCmd
+// prints a one-line notice when it's used.
+const KNOWN_FLAGS = new Set(["--empty", "--with-ui"]);
+
 /**
  * Validate `ayjnt new` arguments. Pure — exported for tests; newCmd owns
- * the printing/exit. A typo'd flag (--with-iu) silently scaffolding the
- * wrong template is worse than an error; same for a stray positional.
+ * the printing/exit. A typo'd flag (--emty) silently scaffolding the wrong
+ * thing is worse than an error; same for a stray positional.
  */
 export function validateNewArgs(argv: string[]): NewArgs {
   if (argv.length === 0 || argv.includes("-h") || argv.includes("--help")) {
     return { kind: "help" };
   }
   const unknownFlags = argv.filter(
-    (a) => a.startsWith("-") && a !== "--with-ui",
+    (a) => a.startsWith("-") && !KNOWN_FLAGS.has(a),
   );
   if (unknownFlags.length > 0) {
     return { kind: "error", message: `unknown option ${unknownFlags[0]}` };
@@ -68,7 +74,8 @@ export function validateNewArgs(argv: string[]): NewArgs {
   return {
     kind: "scaffold",
     targetDir: positional[0],
-    template: argv.includes("--with-ui") ? "with-ui" : "blank",
+    // UI by default; --empty opts out. (--empty wins over a stray --with-ui.)
+    template: argv.includes("--empty") ? "empty" : "ui",
   };
 }
 
@@ -100,6 +107,11 @@ export async function newCmd(argv: string[]): Promise<void> {
     console.error(USAGE);
     process.exit(1);
   }
+  if (argv.includes("--with-ui")) {
+    console.log(
+      "note: ayjnt includes a UI by default now — --with-ui is no longer needed (use --empty to skip the UI).",
+    );
+  }
   const { targetDir, template } = parsed;
 
   const target = path.resolve(targetDir);
@@ -116,9 +128,9 @@ export async function newCmd(argv: string[]): Promise<void> {
   console.log(`  cd ${targetDir}`);
   console.log(`  bun install`);
   console.log(`  bun run dev\n`);
-  if (template === "with-ui") {
-    console.log(`  then open http://localhost:8787/counter/demo in a browser`);
-    console.log(`  (open two tabs to see state sync)\n`);
+  if (template === "ui") {
+    console.log(`  then open http://localhost:8787/            (home page)`);
+    console.log(`            http://localhost:8787/counter/demo (counter — open two tabs)\n`);
   } else {
     console.log(`  then curl http://localhost:8787/alive/hello`);
     console.log(`  → { "status": "alive", "instance": "hello" }\n`);
@@ -144,7 +156,7 @@ async function scaffold(
     readme(projectName, template),
   );
 
-  if (template === "blank") {
+  if (template === "empty") {
     mkdirSync(path.join(target, "agents", "alive"), { recursive: true });
     await Bun.write(
       path.join(target, "agents", "alive", "agent.ts"),
@@ -160,6 +172,9 @@ async function scaffold(
       path.join(target, "agents", "counter", "app.tsx"),
       counterApp(),
     );
+    // Root home UI at "/" — agents/app.tsx. Talks to the counter agent
+    // through its generated typed hook, the same way any page would.
+    await Bun.write(path.join(target, "agents", "app.tsx"), homeApp());
   }
 
   // Drop the Claude Code skills next to the project so authors who use
@@ -213,7 +228,7 @@ function packageJson(name: string, template: Template): string {
     wrangler: "^4",
   };
 
-  if (template === "with-ui") {
+  if (template === "ui") {
     deps["react"] = "^19";
     deps["react-dom"] = "^19";
     devDeps["@types/react"] = "^19";
@@ -239,8 +254,7 @@ function packageJson(name: string, template: Template): string {
 
 function tsconfig(template: Template): string {
   const compilerOptions: Record<string, unknown> = {
-    lib:
-      template === "with-ui" ? ["ESNext", "DOM", "DOM.Iterable"] : ["ESNext"],
+    lib: template === "ui" ? ["ESNext", "DOM", "DOM.Iterable"] : ["ESNext"],
     target: "ESNext",
     module: "Preserve",
     moduleDetection: "force",
@@ -258,7 +272,7 @@ function tsconfig(template: Template): string {
       "@ayjnt/*": ["./.ayjnt/client/*"],
     },
   };
-  if (template === "with-ui") {
+  if (template === "ui") {
     compilerOptions["jsxImportSource"] = "react";
   }
   return JSON.stringify({ compilerOptions }, null, 2) + "\n";
@@ -295,18 +309,32 @@ dist
 
 function readme(name: string, template: Template): string {
   const body =
-    template === "with-ui"
-      ? `## Your first agent
+    template === "ui"
+      ? `## What's here
 
-\`agents/counter/agent.ts\` is a CounterAgent with persistent state. \`agents/counter/app.tsx\` is a React UI that connects to it live.
+- \`agents/counter/agent.ts\` — a \`CounterAgent\` with persistent state.
+- \`agents/counter/app.tsx\` — the counter's own page, served at \`/counter/<instance>\`.
+- \`agents/app.tsx\` — the **home page** served at \`/\`. It's the root UI; it
+  talks to the counter through its generated typed hook (\`@ayjnt/counter\`).
 
-Open http://localhost:8787/counter/demo in two browser tabs — the \`+\` button in one tab updates the other.
+Open http://localhost:8787/ for the home page, and
+http://localhost:8787/counter/demo for the counter — open it in two tabs and
+the \`+\` button in one updates the other.
 
-Each path segment after \`/counter/\` is a separate Durable Object instance with its own state: \`/counter/room-1\` and \`/counter/room-2\` are independent.
+Each path segment after \`/counter/\` is a separate Durable Object instance
+with its own state: \`/counter/room-1\` and \`/counter/room-2\` are independent.
+
+## Adding more UI
+
+Drop an \`app.tsx\` next to any \`agent.ts\` for a per-agent page, or edit
+\`agents/app.tsx\` for the home page. Export your component as the default —
+the framework generates the mount (createRoot, StrictMode, an error boundary).
 `
-      : `## Your blank starter
+      : `## Your bare starter
 
-\`agents/alive/agent.ts\` is a minimal agent that responds with \`{ "status": "alive", "instance": "<id>" }\` to any request. It exists to prove the pipeline works before you replace it with something interesting.
+\`agents/alive/agent.ts\` is a minimal agent that responds with
+\`{ "status": "alive", "instance": "<id>" }\` to any request. It exists to prove
+the pipeline works before you replace it with something interesting.
 
 Try:
 
@@ -327,7 +355,8 @@ That's it. Run \`bun run dev\` and your new agent is reachable at \`/<your-agent
 
 ## Adding a UI
 
-Drop an \`app.tsx\` next to \`agent.ts\`:
+Drop an \`app.tsx\` next to \`agent.ts\` (or \`agents/app.tsx\` for a home page
+at \`/\`):
 
 \`\`\`tsx
 // agents/alive/app.tsx
@@ -342,7 +371,9 @@ export default function App() {
 Export the component as the default — the framework generates the mount
 (createRoot, StrictMode, an error boundary) for you.
 
-Add \`react\`, \`react-dom\`, and their types to \`package.json\`, run \`bun install\`, then \`bun run dev\`. Visit http://localhost:8787/alive/hello in a browser.
+Add \`react\`, \`react-dom\`, and their types to \`package.json\`, run
+\`bun install\`, then \`bun run dev\`. (Or scaffold with the UI included from the
+start — just \`ayjnt new\` without \`--empty\`.)
 `;
   return `# ${name}
 
@@ -376,17 +407,17 @@ plain markdown — edit or delete any that don't fit your house style.
 }
 
 /**
- * The blank starter: one agent that returns "I'm alive" on every request.
+ * The bare starter: one agent that returns "I'm alive" on every request.
  * Intentionally empty state, no methods — just the minimum needed to prove
- * routing, DO binding, and state wiring all work. Every example in /examples
- * starts from this scaffold and replaces agents/alive with its own agents.
+ * routing, DO binding, and state wiring all work. Examples in /examples start
+ * from this (`ayjnt new --empty`) and replace agents/alive with their own.
  */
 function blankAgent(): string {
   return `import { Agent } from "agents";
 import type { GeneratedEnv } from "@ayjnt/env";
 
 /**
- * Blank starter agent. Responds with "I'm alive" to any request on any
+ * Bare starter agent. Responds with "I'm alive" to any request on any
  * instance id (\`/alive/hello\`, \`/alive/anything\`, etc.).
  *
  * Each path segment after \`/alive/\` is a separate Durable Object instance
@@ -447,6 +478,7 @@ export default function Counter() {
         <button style={styles.button} onClick={() => set(0)}>reset</button>
         <button style={styles.button} onClick={() => set(count + 1)}>+</button>
       </div>
+      <p style={styles.meta}><a href="/">← home</a></p>
     </main>
   );
 }
@@ -458,6 +490,43 @@ const styles = {
   count: { fontSize: 96, fontWeight: 700, margin: "24px 0" },
   buttons: { display: "flex", gap: 12, justifyContent: "center" },
   button: { padding: "10px 20px", fontSize: 18, borderRadius: 6, border: "1px solid #ccc", background: "#f7f7f7", cursor: "pointer" },
+};
+`;
+}
+
+function homeApp(): string {
+  // The root home page (agents/app.tsx), served at "/". Demonstrates the
+  // root UI talking to an agent through its generated typed hook — exactly
+  // how any page composes agents.
+  return `import { useAgent } from "@ayjnt/counter";
+
+export default function Home() {
+  const counter = useAgent();
+  const count = counter.state?.count ?? 0;
+
+  return (
+    <main style={styles.main}>
+      <h1 style={styles.title}>Welcome to ayjnt 👋</h1>
+      <p style={styles.lede}>
+        This page is <code>agents/app.tsx</code> — your root UI, served at
+        <code> /</code>. It can talk to any agent through its typed hook.
+      </p>
+      <p style={styles.meta}>
+        the counter's <code>default</code> instance is at{" "}
+        <strong style={styles.count}>{count}</strong>
+      </p>
+      <a style={styles.link} href="/counter/demo">open the counter →</a>
+    </main>
+  );
+}
+
+const styles = {
+  main: { fontFamily: "system-ui, sans-serif", maxWidth: 540, margin: "80px auto", padding: 24, textAlign: "center" as const },
+  title: { fontSize: 32, marginBottom: 16 },
+  lede: { color: "#444", fontSize: 16, lineHeight: 1.6 },
+  meta: { color: "#666", fontSize: 16, lineHeight: 1.6, margin: "32px 0" },
+  count: { fontSize: 22 },
+  link: { fontSize: 16, color: "#2563eb", textDecoration: "none" },
 };
 `;
 }

@@ -107,6 +107,19 @@ export default function Counter() {
 			to the server.
 		</p>
 
+		<h2>A home page at <code>/</code></h2>
+		<p>
+			Put an <code>app.tsx</code> at the <code>agents/</code> root —
+			not inside an agent folder — and ayjnt serves it at{" "}
+			<code>/</code> as the home page. It uses the same{" "}
+			<code>export default</code> component shape as a per-agent{" "}
+			<code>app.tsx</code>, but instead of being bound to one agent it
+			composes agents through their generated{" "}
+			<code>@ayjnt/&lt;route&gt;</code> hooks. The root home page runs
+			through the root <code>middleware.ts</code> chain, just like any
+			other request at that level.
+		</p>
+
 		<h2>What the mount wrapper looks like</h2>
 		<p>
 			The framework emits this at{" "}
@@ -162,7 +175,7 @@ createRoot(el).render(
 		<h2>Required tsconfig setup</h2>
 		<p>
 			The path alias <code>@ayjnt/counter</code> resolves via tsconfig.
-			The <code>ayjnt new --with-ui</code> template configures it; if
+			The default <code>ayjnt new</code> scaffold configures it; if
 			you're adding a UI to an existing project, add this to your{" "}
 			<code>tsconfig.json</code>:
 		</p>
@@ -368,7 +381,7 @@ function deriveInstance(): string {
 		<h2>Adding react and react-dom</h2>
 		<p>
 			React isn't a transitive dependency of ayjnt — you bring it
-			yourself. <code>ayjnt new --with-ui</code> adds these; for an
+			yourself. The default <code>ayjnt new</code> scaffold adds these; for an
 			existing project:
 		</p>
 		<CodeBlock

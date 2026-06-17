@@ -10,6 +10,12 @@ data (JSON / WebSocket) and the React UI (when the browser sends
 `Accept: text/html`). State syncs from server → UI automatically via
 the SDK's WebSocket protocol.
 
+> **Home page?** A `app.tsx` at the `agents/` *root* (not inside an agent
+> folder) is the home UI, served at `/`. Same `export default` shape and
+> hook usage as below — it just composes agents through their generated
+> `@ayjnt/<route>` hooks rather than being bound to one. It's gated by the
+> root `agents/middleware.ts`. The default `ayjnt new` scaffold ships one.
+
 ## What the user needs in place
 
 Before writing the UI:

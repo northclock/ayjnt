@@ -1,6 +1,7 @@
 ---
 import Logo from "./Logo.astro";
-import { GitBranch, Package } from "lucide-react";
+import { GithubIcon } from "@/components/react/GithubIcon.tsx";
+import { NpmIcon } from "@/components/react/NpmIcon.tsx";
 
 const LINKS = [
 	{ href: "/examples", label: "Examples" },
@@ -11,12 +12,12 @@ const EXTERNAL = [
 	{
 		href: "https://github.com/northclock/ayjnt",
 		label: "GitHub",
-		Icon: GitBranch,
+		Icon: GithubIcon,
 	},
 	{
 		href: "https://www.npmjs.com/package/ayjnt",
 		label: "npm",
-		Icon: Package,
+		Icon: NpmIcon,
 	},
 ];
 ---

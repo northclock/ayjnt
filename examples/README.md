@@ -2,14 +2,14 @@
 
 Reference projects that exercise the framework end-to-end. Each is a standalone Bun project with `ayjnt` linked via `file:../..`, so local changes to the framework are immediately reflected.
 
-Every example assumes you start from the blank scaffold:
+Every example assumes you start from the bare scaffold:
 
 ```sh
-bunx ayjnt new my-app          # blank starter — one "I'm alive" agent
-bunx ayjnt new my-app --with-ui  # same, plus React preinstalled
+bunx ayjnt new my-app --empty   # bare starter — one "I'm alive" agent, no UI
+bunx ayjnt new my-app           # (default) same, plus a home page + counter UI
 ```
 
-You then delete the starter agent (`agents/alive` or `agents/counter`) and drop in the example's agents.
+You then delete the starter agent (`agents/alive`, or `agents/counter` + `agents/app.tsx` in the default scaffold) and drop in the example's agents.
 
 ## Gallery
 
@@ -50,7 +50,7 @@ Some examples need extra setup (`.dev.vars` for API keys, or a second terminal f
    - `"scripts"`: `"dev"`, `"build"`, `"deploy"`, `"migrate"` each calling `ayjnt`
 4. `bun install`
 5. Write `agents/<name>/agent.ts`
-6. Add a `README.md` that starts from the blank scaffold (`bunx ayjnt new my-app`), explains what files to add/replace, walks through the code, and ends with a "what it looks like" section
+6. Add a `README.md` that starts from the bare scaffold (`bunx ayjnt new my-app --empty`), explains what files to add/replace, walks through the code, and ends with a "what it looks like" section
 7. Add a `.gitignore` covering `node_modules`, `.ayjnt/dist`, `.ayjnt/manifest.json`, `.wrangler`, `.env*`, `.dev.vars`
 8. Add an entry to the table above
 9. Add a matching entry to `docs/src/content/examples.ts` with `steps: [SCAFFOLD_BLANK|SCAFFOLD_WITH_UI, …, { screenshot: { content: "…" }}, deployStep(…)]`

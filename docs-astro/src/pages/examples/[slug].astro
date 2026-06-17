@@ -1,5 +1,6 @@
 ---
-import { ArrowLeft, GitBranch } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { GithubIcon } from "@/components/react/GithubIcon.tsx";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import Button from "@/components/Button.astro";
 import CodeBlock from "@/components/CodeBlock.astro";
@@ -51,7 +52,7 @@ const { example } = Astro.props;
 							variant="secondary"
 							external
 						>
-							<GitBranch className="h-4 w-4" />
+							<GithubIcon className="h-4 w-4" />
 							source on GitHub
 						</Button>
 					</div>

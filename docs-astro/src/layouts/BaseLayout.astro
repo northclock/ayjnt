@@ -15,6 +15,9 @@ type Props = {
 	description?: string;
 	ogTitle?: string;
 	ogDescription?: string;
+	/** Path (or absolute URL) of the social-share image. Resolved to an
+	 *  absolute URL against `site` — scrapers reject relative og:image. */
+	ogImage?: string;
 };
 
 const {
@@ -22,7 +25,15 @@ const {
 	description = "File-based routing, auto-generated wrangler config, typed inter-agent RPC, co-located React UIs, and MCP support. No worker boilerplate, no wrangler wrestling.",
 	ogTitle = "ayjnt — Agent-first framework for Cloudflare",
 	ogDescription = "File-based routing for Cloudflare Agents. Write the agent, the framework writes everything else.",
+	ogImage = "/og.jpg",
 } = Astro.props;
+
+// Build ABSOLUTE URLs at build time (scrapers reject relative og:image).
+// `Astro.site` comes from astro.config's `site`; fall back to the current
+// page's origin so a missing `site` still produces a usable absolute URL.
+const siteOrigin = Astro.site ?? new URL(Astro.url.origin);
+const ogImageUrl = new URL(ogImage, siteOrigin).href;
+const canonicalUrl = new URL(Astro.url.pathname, siteOrigin).href;
 ---
 <!doctype html>
 <html lang="en">
@@ -30,11 +41,19 @@ const {
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<link rel="canonical" href={canonicalUrl} />
 		<title>{title}</title>
 		<meta name="description" content={description} />
 		<meta property="og:title" content={ogTitle} />
 		<meta property="og:description" content={ogDescription} />
 		<meta property="og:type" content="website" />
+		<meta property="og:url" content={canonicalUrl} />
+		<meta property="og:image" content={ogImageUrl} />
+		<meta property="og:image:alt" content={ogTitle} />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={ogTitle} />
+		<meta name="twitter:description" content={ogDescription} />
+		<meta name="twitter:image" content={ogImageUrl} />
 		<style is:global>
 			:root {
 				--font-geist-sans: "Geist Sans", system-ui, -apple-system, sans-serif;

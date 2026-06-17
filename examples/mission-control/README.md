@@ -23,7 +23,7 @@ agents/
 ## Scaffold
 
 ```sh
-bunx ayjnt new my-mission --with-ui
+bunx ayjnt new my-mission
 cd my-mission
 rm -rf agents/counter
 mkdir -p "agents/(mission)/commander" "agents/(mission)/navigator" \

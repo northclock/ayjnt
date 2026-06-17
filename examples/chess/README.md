@@ -12,7 +12,7 @@ agents/
 ## Scaffold
 
 ```sh
-bunx ayjnt new my-chess --with-ui
+bunx ayjnt new my-chess
 cd my-chess
 rm -rf agents/counter
 mkdir -p agents/match

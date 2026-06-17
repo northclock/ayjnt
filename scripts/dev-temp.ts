@@ -29,11 +29,11 @@ const REPO = path.resolve(import.meta.dir, "..");
 // it never accumulates and you can muscle-memory the `cd`.
 const TEMP = path.join(tmpdir(), "ayjnt-dev-temp");
 
-// `--blank` for the minimal one-agent starter; default is the richer
-// counter-with-UI template (exercises bundling, the typed useAgent hook,
-// and live multi-tab state).
-const blank = process.argv.includes("--blank");
-const template = blank ? "blank" : "with-ui";
+// `--empty` for the minimal one-agent starter; default is the richer UI
+// template (counter agent + its page + a root home page — exercises
+// bundling, the typed useAgent hook, the root app.tsx, and live state).
+const empty = process.argv.includes("--empty");
+const template = empty ? "empty" : "ui";
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -68,7 +68,7 @@ console.log(dim("    (wiped any previous sandbox so you start clean)"));
 // 2. scaffold with the local CLI, exactly as `bunx ayjnt new` would
 say(`Scaffolding a new project with the local ${bold("ayjnt new")}`);
 const newArgs = ["run", path.join(REPO, "bin", "ayjnt.ts"), "new", TEMP];
-if (!blank) newArgs.push("--with-ui");
+if (empty) newArgs.push("--empty");
 await run("bun", newArgs, REPO);
 
 // 3. install the project's own deps (agents, wrangler, react…)
@@ -100,9 +100,10 @@ await Bun.write(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 console.log(dim("    dev/build/migrate/deploy now run THIS checkout's CLI"));
 
 // done — tell the user exactly how to start poking at it
-const startUrl = blank
+const startUrl = empty
   ? "curl http://localhost:8787/alive/hello"
-  : "open  http://localhost:8787/counter/demo   (open two tabs — state syncs live)";
+  : "open  http://localhost:8787/             (home page, agents/app.tsx)\n" +
+    "          open  http://localhost:8787/counter/demo (counter — two tabs sync live)";
 
 console.log(bold(green("\n✓ sandbox ready\n")));
 console.log("  Your throwaway project lives at:\n");
