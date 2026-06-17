@@ -10,6 +10,7 @@ import { FileTree } from "@/components/react/FileTree.tsx";
 import { FeatureContent } from "@/components/react/FeatureContent.tsx";
 import { ExampleCard } from "@/components/react/ExampleCard.tsx";
 import { ArchitectureDiagram } from "@/components/react/ArchitectureDiagram.tsx";
+import BlurText from "@/components/react/BlurText.tsx";
 import { EXAMPLES } from "@/content/examples";
 import { existsSync } from "node:fs";
 
@@ -156,9 +157,13 @@ const interAgentFacts: Array<[string, string]> = [
 				/>
 				<!-- centered scrim keeps the caption legible over the busy art -->
 				<div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_rgba(0,0,0,0.62),_rgba(0,0,0,0.22)_55%,_transparent_80%)]">
-					<p class="banner-caption px-6 text-center font-sans text-3xl font-semibold tracking-tight text-white md:text-5xl">
-						One harness, many agents.
-					</p>
+					<BlurText
+						client:visible
+						text="One harness, many agents."
+						animateBy="words"
+						direction="top"
+						className="justify-center px-6 text-center font-sans text-3xl font-semibold tracking-tight text-white md:text-5xl [text-shadow:0_2px_12px_rgba(0,0,0,0.85)]"
+					/>
 				</div>
 			</section>
 		)}
@@ -355,49 +360,4 @@ const interAgentFacts: Array<[string, string]> = [
 			</div>
 		</section>
 	</div>
-
-	<style>
-		.banner-caption {
-			text-shadow:
-				0 2px 14px rgba(0, 0, 0, 0.75),
-				0 0 6px rgba(0, 0, 0, 0.6);
-			transition: opacity 0.8s ease, transform 0.8s ease;
-		}
-		/* Hidden only once JS arms the fade — no-JS users still see the caption. */
-		.banner-caption.will-fade {
-			opacity: 0;
-			transform: translateY(14px);
-		}
-		.banner-caption.will-fade.is-visible {
-			opacity: 1;
-			transform: translateY(0);
-		}
-		@media (prefers-reduced-motion: reduce) {
-			.banner-caption {
-				transition: none;
-			}
-			.banner-caption.will-fade {
-				opacity: 1;
-				transform: none;
-			}
-		}
-	</style>
-	<script>
-		const cap = document.querySelector(".banner-caption");
-		if (cap) {
-			cap.classList.add("will-fade");
-			const io = new IntersectionObserver(
-				(entries, obs) => {
-					for (const e of entries) {
-						if (e.isIntersecting) {
-							cap.classList.add("is-visible");
-							obs.disconnect();
-						}
-					}
-				},
-				{ threshold: 0.4 },
-			);
-			io.observe(cap);
-		}
-	</script>
 </BaseLayout>

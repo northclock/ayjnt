@@ -2,6 +2,8 @@
 import Logo from "./Logo.astro";
 import { GithubIcon } from "@/components/react/GithubIcon.tsx";
 import { NpmIcon } from "@/components/react/NpmIcon.tsx";
+import { XIcon } from "@/components/react/XIcon.tsx";
+import { InstagramIcon } from "@/components/react/InstagramIcon.tsx";
 
 const LINKS = [
 	{ href: "/examples", label: "Examples" },
@@ -18,6 +20,16 @@ const EXTERNAL = [
 		href: "https://www.npmjs.com/package/ayjnt",
 		label: "npm",
 		Icon: NpmIcon,
+	},
+	{
+		href: "https://x.com/ayjntframework",
+		label: "X",
+		Icon: XIcon,
+	},
+	{
+		href: "https://www.instagram.com/ayjntframework",
+		label: "Instagram",
+		Icon: InstagramIcon,
 	},
 ];
 ---
