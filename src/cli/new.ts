@@ -515,7 +515,7 @@ export default function Home() {
         the counter's <code>default</code> instance is at{" "}
         <strong style={styles.count}>{count}</strong>
       </p>
-      <a style={styles.link} href="/counter/demo">open the counter →</a>
+      <a style={styles.link} href="/counter">open the counter →</a>
     </main>
   );
 }
