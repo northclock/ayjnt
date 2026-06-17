@@ -52,14 +52,15 @@ import CodeBlock from "@/components/CodeBlock.astro";
 		<h2>Scaffold a project</h2>
 		<CodeBlock
 			lang="sh"
-			code={`bunx ayjnt new my-app              # minimal template: one agent, no UI
-bunx ayjnt new my-app --with-ui   # with a React UI (counter example)`}
+			code={`bunx ayjnt new my-app           # UI included: home page + counter agent
+bunx ayjnt new my-app --empty   # bare: one "I'm alive" agent, no UI`}
 		/>
 		<p>
-			The minimal template gives you a single <code>ChatAgent</code>{" "}
-			that accepts POST requests and stores messages in DO state. The
-			with-ui template adds <code>app.tsx</code> next to the agent and
-			wires up a live-syncing React counter.
+			The default scaffold adds a <code>counter</code> agent with its own{" "}
+			<code>app.tsx</code> plus a root <code>agents/app.tsx</code> home
+			page served at <code>/</code>, wiring up a live-syncing React
+			counter. Pass <code>--empty</code> for a single bare{" "}
+			<code>ChatAgent</code> with no UI and no React.
 		</p>
 
 		<h3>What got created</h3>
@@ -67,7 +68,7 @@ bunx ayjnt new my-app --with-ui   # with a React UI (counter example)`}
 			lang="sh"
 			code={`my-app/
 ├── agents/
-│   └── chat/agent.ts        # (or counter/ with --with-ui)
+│   └── chat/agent.ts        # (default adds counter/ + counter/app.tsx + agents/app.tsx; this shows --empty)
 ├── package.json             # scripts: dev, build, deploy, migrate
 ├── tsconfig.json            # paths set up for @ayjnt/env and @ayjnt/*
 └── .gitignore`}
@@ -77,8 +78,8 @@ bunx ayjnt new my-app --with-ui   # with a React UI (counter example)`}
 		<CodeBlock lang="sh" code={`cd my-app && bun install`} />
 		<p>
 			This pulls <code>ayjnt</code>, the Cloudflare{" "}
-			<code>agents</code> SDK, <code>wrangler</code>, and (for the with-ui
-			template) <code>react</code> and <code>react-dom</code>.
+			<code>agents</code> SDK, <code>wrangler</code>, and (React, for the
+			default UI scaffold) <code>react</code> and <code>react-dom</code>.
 		</p>
 
 		<h2>Run locally</h2>

@@ -1,5 +1,7 @@
 ---
-import { Code2, GitBranch, LayoutGrid, Package } from "lucide-react";
+import { Code2, LayoutGrid } from "lucide-react";
+import { GithubIcon } from "@/components/react/GithubIcon.tsx";
+import { NpmIcon } from "@/components/react/NpmIcon.tsx";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import Button from "@/components/Button.astro";
 import CodeBlock from "@/components/CodeBlock.astro";
@@ -9,8 +11,14 @@ import { FeatureContent } from "@/components/react/FeatureContent.tsx";
 import { ExampleCard } from "@/components/react/ExampleCard.tsx";
 import { ArchitectureDiagram } from "@/components/react/ArchitectureDiagram.tsx";
 import { EXAMPLES } from "@/content/examples";
+import { existsSync } from "node:fs";
 
 const featured = EXAMPLES.filter((e) => e.status === "stable").slice(0, 6);
+
+// The showcase banner renders only once the image is present, so we never
+// ship a broken <img>. (`public/og.jpg` resolves against the project root —
+// astro build's cwd.)
+const hasBanner = existsSync("public/og.jpg");
 
 const interAgentCode = `// agents/orders/agent.ts
 import { Agent } from "agents";
@@ -30,14 +38,14 @@ export default class OrdersAgent extends Agent<Env, State> {
 }`;
 
 const quickStartBullets = [
-	"New project with minimal or with-ui template",
+	"New project with a UI by default (--empty for none)",
 	"Generated wrangler config, migrations, and entry point",
 	"HMR-backed dev server that rebuilds on file-tree changes",
 ];
 
 const quickStartTerminal = [
 	{ kind: "command" as const, text: "bunx ayjnt new my-agent-app" },
-	{ kind: "output" as const, text: "✓ scaffolded my-agent-app/ (minimal)" },
+	{ kind: "output" as const, text: "✓ scaffolded my-agent-app/ (ui)" },
 	{ kind: "blank" as const },
 	{ kind: "command" as const, text: "cd my-agent-app && bun install" },
 	{ kind: "output" as const, text: "✓ 237 packages installed [3.2s]" },
@@ -107,7 +115,7 @@ const interAgentFacts: Array<[string, string]> = [
 		<section class="relative isolate overflow-hidden border-b border-[var(--ink)]">
 			<div class="grid-paper absolute inset-0 opacity-60"></div>
 			<div class="relative mx-auto max-w-6xl px-6 pt-20 pb-24 md:pt-28 md:pb-32">
-				<span class="tag mb-5">v0.5 · Bun-first · for Cloudflare Agents</span>
+				<span class="tag mb-5">v0.5 · for Cloudflare Agents</span>
 				<h1 class="text-balance font-sans text-5xl font-semibold leading-[1.05] tracking-tight md:text-7xl">
 					Write the agent.
 					<br />
@@ -131,11 +139,29 @@ const interAgentFacts: Array<[string, string]> = [
 						<LayoutGrid className="h-4 w-4" /> Browse examples
 					</Button>
 					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
-						<GitBranch className="h-4 w-4" /> GitHub
+						<GithubIcon className="h-4 w-4" /> GitHub
 					</Button>
 				</div>
 			</div>
 		</section>
+
+		<!-- Showcase banner (renders only when public/og.jpg exists) -->
+		{hasBanner && (
+			<section class="relative border-b border-[var(--ink)]">
+				<img
+					src="/og.jpg"
+					alt="A pixel-art agent control room: many small mascot agents coordinated by one larger one, screens showing swarm logic and active agent IDs."
+					loading="lazy"
+					class="block w-full max-h-[70vh] min-h-[260px] object-cover"
+				/>
+				<!-- centered scrim keeps the caption legible over the busy art -->
+				<div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_rgba(0,0,0,0.62),_rgba(0,0,0,0.22)_55%,_transparent_80%)]">
+					<p class="banner-caption px-6 text-center font-sans text-3xl font-semibold tracking-tight text-white md:text-5xl">
+						One harness, many agents.
+					</p>
+				</div>
+			</section>
+		)}
 
 		<!-- Quick start -->
 		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
@@ -320,13 +346,58 @@ const interAgentFacts: Array<[string, string]> = [
 						<Code2 className="h-4 w-4" /> Start the docs
 					</Button>
 					<Button href="https://www.npmjs.com/package/ayjnt" variant="secondary" external>
-						<Package className="h-4 w-4" /> ayjnt on npm
+						<NpmIcon className="h-4 w-4" /> ayjnt on npm
 					</Button>
 					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
-						<GitBranch className="h-4 w-4" /> Source on GitHub
+						<GithubIcon className="h-4 w-4" /> Source on GitHub
 					</Button>
 				</div>
 			</div>
 		</section>
 	</div>
+
+	<style>
+		.banner-caption {
+			text-shadow:
+				0 2px 14px rgba(0, 0, 0, 0.75),
+				0 0 6px rgba(0, 0, 0, 0.6);
+			transition: opacity 0.8s ease, transform 0.8s ease;
+		}
+		/* Hidden only once JS arms the fade — no-JS users still see the caption. */
+		.banner-caption.will-fade {
+			opacity: 0;
+			transform: translateY(14px);
+		}
+		.banner-caption.will-fade.is-visible {
+			opacity: 1;
+			transform: translateY(0);
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.banner-caption {
+				transition: none;
+			}
+			.banner-caption.will-fade {
+				opacity: 1;
+				transform: none;
+			}
+		}
+	</style>
+	<script>
+		const cap = document.querySelector(".banner-caption");
+		if (cap) {
+			cap.classList.add("will-fade");
+			const io = new IntersectionObserver(
+				(entries, obs) => {
+					for (const e of entries) {
+						if (e.isIntersecting) {
+							cap.classList.add("is-visible");
+							obs.disconnect();
+						}
+					}
+				},
+				{ threshold: 0.4 },
+			);
+			io.observe(cap);
+		}
+	</script>
 </BaseLayout>

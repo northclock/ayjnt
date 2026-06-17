@@ -1,7 +1,7 @@
 // Data model for every example shown on the site.
 //
-// Every walkthrough starts from the `bunx ayjnt new <dir>` blank scaffold
-// (a single `alive` agent that replies "I'm alive"). Each example's steps
+// Every walkthrough starts from the `bunx ayjnt new <dir> --empty` bare
+// scaffold (a single `alive` agent that replies "I'm alive"). Each example's steps
 // then (a) explain which files to add/replace, (b) walk through the code
 // highlighting the ayjnt + Agents SDK features in use, and (c) end with a
 // "what the app should look like" screenshot.
@@ -54,12 +54,12 @@ export type ExampleMeta = {
 // ---------------------------------------------------------------------------
 
 const SCAFFOLD_BLANK: Step = {
-	title: "Start from the blank scaffold",
+	title: "Start from the bare scaffold",
 	blurb:
-		"Every ayjnt example starts here. `bunx ayjnt new` drops a one-agent project with a single `alive` agent that responds \"I'm alive\" to any request — enough to prove the pipeline works before you replace it with the real thing.",
+		"Every ayjnt example starts here. `bunx ayjnt new --empty` drops a one-agent project with a single `alive` agent that responds \"I'm alive\" to any request — enough to prove the pipeline works before you replace it with the real thing. (Without `--empty`, `ayjnt new` also scaffolds a home page and counter UI.)",
 	terminal: [
-		{ kind: "command", text: "bunx ayjnt new my-app" },
-		{ kind: "output", text: "✓ scaffolded my-app/ (blank)" },
+		{ kind: "command", text: "bunx ayjnt new my-app --empty" },
+		{ kind: "output", text: "✓ scaffolded my-app/ (empty)" },
 		{ kind: "blank" },
 		{ kind: "command", text: "cd my-app && bun install" },
 		{ kind: "output", text: "✓ 42 packages installed" },
@@ -98,16 +98,16 @@ const SCAFFOLD_BLANK: Step = {
 		{ type: "file", name: ".gitignore", kind: "txt" },
 		{ type: "file", name: "README.md", kind: "md" },
 	],
-	treeTitle: "my-app/  (blank scaffold)",
+	treeTitle: "my-app/  (--empty scaffold)",
 };
 
 const SCAFFOLD_WITH_UI: Step = {
-	title: "Start from the blank scaffold (with UI)",
+	title: "Start from the default scaffold (with UI)",
 	blurb:
-		"Same starter as the blank template but with React, react-dom and matching @types preinstalled so your agent.ts can have an app.tsx next to it. The default project is a Counter agent — we'll replace it with the example's agent in the next steps.",
+		"Same starter as the bare template but with React, react-dom and matching @types preinstalled so your agent.ts can have an app.tsx next to it. The default project is a Counter agent plus a root `agents/app.tsx` home page served at `/` — we'll replace the counter with the example's agent in the next steps.",
 	terminal: [
-		{ kind: "command", text: "bunx ayjnt new my-app --with-ui" },
-		{ kind: "output", text: "✓ scaffolded my-app/ (with-ui)" },
+		{ kind: "command", text: "bunx ayjnt new my-app" },
+		{ kind: "output", text: "✓ scaffolded my-app/ (ui)" },
 		{ kind: "blank" },
 		{ kind: "command", text: "cd my-app && bun install" },
 		{ kind: "output", text: "✓ 168 packages installed" },
@@ -139,7 +139,7 @@ const SCAFFOLD_WITH_UI: Step = {
 		{ type: "file", name: "package.json", kind: "json" },
 		{ type: "file", name: "tsconfig.json", kind: "json" },
 	],
-	treeTitle: "my-app/  (--with-ui scaffold)",
+	treeTitle: "my-app/  (default UI scaffold)",
 };
 
 // Shared deploy step. Contents are mostly the same across examples so keep
@@ -183,7 +183,7 @@ export const EXAMPLES: ExampleMeta[] = [
 			],
 		},
 		whatYoullLearn: [
-			"How the blank scaffold maps folders to agent URLs",
+			"How the bare scaffold maps folders to agent URLs",
 			"How `this.state` / `this.setState` persist on a Durable Object instance",
 			"How to run ayjnt dev and hit the agent with curl",
 		],
@@ -1051,7 +1051,7 @@ export default function NotesApp() {
 			{
 				title: "Folder shape — agent + UI side by side",
 				blurb:
-					"The `--with-ui` scaffold drops a Counter agent for you. Look at what it laid down — one folder with both the server (agent.ts) and the client (app.tsx). The generated typed hook wires them.",
+					"The default scaffold drops a Counter agent for you. Look at what it laid down — one folder with both the server (agent.ts) and the client (app.tsx). The generated typed hook wires them.",
 				treeTitle: "my-app/agents/counter/",
 				tree: [
 					{
@@ -1778,7 +1778,7 @@ t=6s  pending: 0  fired: say hi, drink water, stretch
 			{
 				title: "Replace counter/ with heartbeat/",
 				blurb:
-					"The --with-ui scaffold gave us react + react-dom + typed tsconfig already. All that's left is swap the agent.",
+					"The default UI scaffold gave us react + react-dom + typed tsconfig already. All that's left is swap the agent.",
 				terminal: [
 					{ kind: "command", text: "rm -rf agents/counter" },
 					{ kind: "command", text: "mkdir agents/heartbeat" },
@@ -2444,7 +2444,7 @@ export default function Room() {
 			{
 				title: "Replace counter/ with chat/, add Gemini key",
 				blurb:
-					"`.dev.vars` is wrangler-native — put env vars there for `bun run dev`, and they appear as `c.env.*`. `.dev.vars` is gitignored by the blank scaffold's .gitignore. For deploys you use `wrangler secret put`.",
+					"`.dev.vars` is wrangler-native — put env vars there for `bun run dev`, and they appear as `c.env.*`. `.dev.vars` is gitignored by the scaffold's .gitignore. For deploys you use `wrangler secret put`.",
 				terminal: [
 					{ kind: "command", text: "rm -rf agents/counter" },
 					{ kind: "command", text: "mkdir agents/chat" },

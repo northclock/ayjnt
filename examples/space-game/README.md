@@ -12,7 +12,7 @@ agents/
 ## Scaffold
 
 ```sh
-bunx ayjnt new my-space --with-ui
+bunx ayjnt new my-space
 cd my-space
 rm -rf agents/counter
 mkdir -p agents/sector

@@ -6,6 +6,8 @@ You write agents. ayjnt generates the worker entrypoint, the wrangler config, an
 
 ```
 agents/
+  app.tsx           ← optional home UI, served at /
+  middleware.ts     ← optional, runs for every agent
   chat/
     agent.ts        ← export default class extends Agent
     app.tsx         ← optional React UI, typed to this agent
@@ -19,17 +21,18 @@ agents/
 ## Quickstart
 
 ```sh
-bunx ayjnt new my-app             # blank starter — one "I'm alive" agent
-bunx ayjnt new my-app --with-ui   # same, plus React preinstalled
+bunx ayjnt new my-app           # UI included: a home page + a counter agent
+bunx ayjnt new my-app --empty   # bare: one "I'm alive" agent, no UI
 
 cd my-app
 bun install
 bun run dev
-# curl http://localhost:8787/alive/hello      (blank)
-# open http://localhost:8787/counter/demo     (with-ui)
+# open http://localhost:8787/              home page (agents/app.tsx)
+# open http://localhost:8787/counter/demo  the counter agent's page
+# (--empty)  curl http://localhost:8787/alive/hello
 ```
 
-That's a running agent: the folder path is the URL, the trailing segment picks a Durable Object instance (`/alive/hello` and `/alive/bob` are two separate stateful instances; no segment means `default`).
+That's a running agent: the folder path is the URL, the trailing segment picks a Durable Object instance (`/counter/demo` and `/counter/bob` are two separate stateful instances; no segment means `default`).
 
 A minimal agent looks like this:
 
@@ -57,6 +60,7 @@ Save it, and `ayjnt dev` picks it up — no config, no registration, no migratio
 |---|---|
 | `agents/<route>/agent.ts` | Required. Default-export a class extending `Agent` (or `McpAgent`). The folder path is the URL prefix. |
 | `agents/<route>/app.tsx` | Optional React UI, served at the agent's own URL. A typed `useAgent()` hook is generated for you. |
+| `agents/app.tsx` | Optional **home page**, served at `/`. The root UI — composes any agent through its typed hook, gated by the root `middleware.ts`. |
 | `agents/<route>/docs.md` | Optional markdown docs, served at `/<route>/docs` behind the same middleware as the agent. |
 | `agents/**/middleware.ts` | Hono-style middleware for every descendant agent. Files chain root → leaf, like Next.js layouts. |
 | `agents/(group)/` | Route group — stripped from the URL, but its `middleware.ts` still applies. |
@@ -66,7 +70,7 @@ Save it, and `ayjnt dev` picks it up — no config, no registration, no migratio
 
 | Command | What it does |
 |---|---|
-| `ayjnt new <dir>` | Scaffold a project. `--with-ui` includes a React starter. |
+| `ayjnt new <dir>` | Scaffold a project. UI included by default; `--empty` for a bare, no-UI starter. |
 | `ayjnt dev` | Codegen, then `wrangler dev`. |
 | `ayjnt build` | Pure codegen — writes `.ayjnt/` (wrangler config, worker entry, typed hooks, env types). |
 | `ayjnt migrate` | Preview the pending DO migration without writing anything. |
@@ -78,7 +82,7 @@ All commands accept `--cwd <path>` and forward unknown flags to wrangler (e.g. `
 
 Each feature is one file or one import away. The linked example is a complete, runnable project.
 
-- **React UI per agent** — drop `app.tsx` next to `agent.ts`; the generated `useAgent()` hook gives you typed live state with multi-tab sync. → [`examples/with-ui`](./examples/with-ui)
+- **React UI per agent + a home page** — drop `app.tsx` next to `agent.ts` for a per-agent page, or `agents/app.tsx` for a home page at `/`; the generated `useAgent()` hook gives you typed live state with multi-tab sync. → [`examples/with-ui`](./examples/with-ui)
 - **Middleware** — auth gates, logging, response wrapping; layered by folder. → [`examples/middleware`](./examples/middleware)
 - **Inter-agent RPC** — call another agent's methods with full type safety via `getAgent<T>()` from `ayjnt/rpc`. Native Workers RPC, no HTTP. → [`examples/inter-agent`](./examples/inter-agent)
 - **Browser-callable methods** — mark a method with Cloudflare's `@callable()` decorator and call it from the UI as `agent.stub.method()`, typed end-to-end. → [`examples/callable-client`](./examples/callable-client)

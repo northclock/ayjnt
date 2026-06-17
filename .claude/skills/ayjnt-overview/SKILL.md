@@ -14,11 +14,12 @@ UI bundles.
 
 ```
 agents/
+  app.tsx            # optional — root home UI, served at /
+  middleware.ts      # optional — applies to every descendant agent
   <route>/
     agent.ts         # required — default-exports a class extending Agent or McpAgent
     app.tsx          # optional — co-located React UI, served at same URL
     docs.md          # optional — markdown, served at /<route>/docs
-  middleware.ts      # optional — applies to every descendant agent
   (group)/           # optional — route group; folder name stripped from URL, middleware chains still apply
     <route>/agent.ts
 ```
@@ -64,7 +65,7 @@ export const agentId = "users_v1";
 
 | Command | What it does |
 |---|---|
-| `bunx ayjnt new <dir>` | Scaffold a fresh project. `--with-ui` includes React. |
+| `bunx ayjnt new <dir>` | Scaffold a fresh project. UI included by default (home page + counter); `--empty` for a bare, no-UI starter. |
 | `bun run dev` (== `ayjnt dev`) | Codegen + `wrangler dev`. |
 | `bun run build` (== `ayjnt build`) | Pure codegen — writes `.ayjnt/dist/{wrangler.jsonc,entry.ts}` + the typed `useAgent` hooks. |
 | `bun run migrate` | Preview pending DO-migration entry without writing it. |
@@ -98,6 +99,9 @@ should be gitignored.
 - `/__ayjnt/catalog` — JSON tree of every agent the caller can reach,
   filtered by each agent's middleware. Returns `@callable` methods,
   `hasApp`, `hasDocs`, `docsUrl` per agent.
+- `/` — serves the root home UI when `agents/app.tsx` exists (HTML
+  navigations only), through the root `agents/middleware.ts` chain.
+  404 otherwise. See [`ayjnt-add-ui`](../ayjnt-add-ui/SKILL.md).
 
 ## Feature index
 

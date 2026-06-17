@@ -58,7 +58,7 @@ import CodeBlock from "@/components/CodeBlock.astro";
 		</p>
 
 		<h2>ayjnt new</h2>
-		<CodeBlock lang="sh" code={`ayjnt new <directory> [--with-ui]`} />
+		<CodeBlock lang="sh" code={`ayjnt new <directory> [--empty]`} />
 		<p>
 			Scaffolds a new ayjnt project at <code>&lt;directory&gt;</code>.
 			Fails if the directory already exists.
@@ -73,12 +73,11 @@ import CodeBlock from "@/components/CodeBlock.astro";
 			<tbody>
 				<tr>
 					<td>
-						<code>--with-ui</code>
+						<code>--empty</code>
 					</td>
 					<td>
-						Include <code>react</code>, <code>react-dom</code>, and a
-						counter <code>app.tsx</code>. Without it, you get a minimal
-						ChatAgent with no UI.
+						Skip the UI — scaffold a single bare "I'm alive" agent and
+						no React. Default includes a UI (home page + counter).
 					</td>
 				</tr>
 			</tbody>
@@ -88,7 +87,7 @@ import CodeBlock from "@/components/CodeBlock.astro";
 			lang="sh"
 			code={`my-app/
 ├── agents/
-│   └── chat/agent.ts       # (or counter/agent.ts + app.tsx with --with-ui)
+│   └── chat/agent.ts       # --empty; default adds counter/ + agents/app.tsx
 ├── package.json            # with dev/build/deploy/migrate scripts
 ├── tsconfig.json           # path aliases pre-wired
 ├── .gitignore              # .ayjnt/* except migrations.json
@@ -258,7 +257,7 @@ Run \`ayjnt build\` to stage this migration in .ayjnt/migrations.json.`}
 			code={`ayjnt <command> [options]
 
 Commands:
-  new <dir>        Scaffold a new ayjnt project (--with-ui for a React starter)
+  new <dir>        Scaffold a new ayjnt project (UI included; --empty for none)
   dev              Start a local development server (wraps wrangler dev)
   build            Generate config + bundle, no deploy
   deploy           Build and deploy to Cloudflare (wraps wrangler deploy)

@@ -13,8 +13,8 @@ describe("validateNewArgs", () => {
   });
 
   test("a typo'd flag is an error, not a silently-wrong template", () => {
-    const r = validateNewArgs(["my-app", "--with-iu"]);
-    expect(r).toEqual({ kind: "error", message: "unknown option --with-iu" });
+    const r = validateNewArgs(["my-app", "--emty"]);
+    expect(r).toEqual({ kind: "error", message: "unknown option --emty" });
   });
 
   test("extra positionals are rejected", () => {
@@ -23,23 +23,39 @@ describe("validateNewArgs", () => {
   });
 
   test("missing directory is rejected", () => {
-    expect(validateNewArgs(["--with-ui"])).toEqual({
+    expect(validateNewArgs(["--empty"])).toEqual({
       kind: "error",
       message: "missing <directory>",
     });
   });
 
-  test("template selection", () => {
+  test("UI is the default; --empty opts out", () => {
     expect(validateNewArgs(["my-app"])).toEqual({
       kind: "scaffold",
       targetDir: "my-app",
-      template: "blank",
+      template: "ui",
     });
+    expect(validateNewArgs(["my-app", "--empty"])).toEqual({
+      kind: "scaffold",
+      targetDir: "my-app",
+      template: "empty",
+    });
+  });
+
+  test("--with-ui is tolerated as a deprecated no-op (still the default UI)", () => {
     expect(validateNewArgs(["my-app", "--with-ui"])).toEqual({
       kind: "scaffold",
       targetDir: "my-app",
-      template: "with-ui",
+      template: "ui",
     });
+  });
+
+  test("--empty wins over a stray --with-ui", () => {
+    expect(validateNewArgs(["my-app", "--with-ui", "--empty"]).kind).toBe(
+      "scaffold",
+    );
+    const r = validateNewArgs(["my-app", "--with-ui", "--empty"]);
+    expect(r.kind === "scaffold" && r.template).toBe("empty");
   });
 });
 

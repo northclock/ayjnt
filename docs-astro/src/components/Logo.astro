@@ -1,7 +1,5 @@
 ---
-// The ayjnt wordmark. The two-letter mark reads "aj" — phonetically
-// "ayjnt" stripped of its vowels, matching the package name's
-// consonant-only naming.
+// The ayjnt brand mark: the northclock mascot + the "/AYjnt/" wordmark.
 type Props = {
 	class?: string;
 	showWordmark?: boolean;
@@ -9,11 +7,13 @@ type Props = {
 const { class: className = "", showWordmark = true } = Astro.props;
 ---
 <span class={`inline-flex items-center gap-2 font-mono font-semibold ${className}`}>
-	<span
-		class="inline-flex h-7 w-7 items-center justify-center border-2 border-current text-sm"
-		aria-hidden="true"
-	>
-		aj
-	</span>
+	<img
+		src="/mascot.svg"
+		alt={showWordmark ? "" : "ayjnt"}
+		aria-hidden={showWordmark ? "true" : undefined}
+		width="28"
+		height="28"
+		class="h-7 w-7"
+	/>
 	{showWordmark && <span class="text-base tracking-tight">/AYjnt/</span>}
 </span>
