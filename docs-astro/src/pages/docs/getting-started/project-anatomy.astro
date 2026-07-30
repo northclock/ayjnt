@@ -19,6 +19,8 @@ const tree = [
 				children: [
 					{ type: "file" as const, name: "agent.ts", kind: "ts" as const },
 					{ type: "file" as const, name: "app.tsx", kind: "tsx" as const, note: "optional UI" },
+					{ type: "file" as const, name: "tools.ts", kind: "ts" as const, note: "optional — model tools, workerd" },
+					{ type: "file" as const, name: "tools.host.ts", kind: "ts" as const, note: "optional — model tools, Bun host" },
 				],
 			},
 			{ type: "file" as const, name: "middleware.ts", kind: "ts" as const, note: "optional" },
@@ -83,6 +85,7 @@ const tree = [
 			},
 		],
 	},
+	{ type: "file" as const, name: "cli.ts", kind: "ts" as const, note: "optional — makes the app runnable" },
 	{ type: "file" as const, name: "package.json", kind: "json" as const },
 	{ type: "file" as const, name: "tsconfig.json", kind: "json" as const },
 	{ type: "file" as const, name: ".gitignore", kind: "txt" as const },
@@ -119,6 +122,35 @@ const tree = [
 			<code>@ayjnt/&lt;route&gt;</code>, which is a typed hook the framework
 			generates. Bundled with Bun and served at the same URL via Cloudflare
 			Assets.
+		</p>
+
+		<h3>
+			<code>agents/&lt;name&gt;/tools.ts</code> and{" "}
+			<code>tools.host.ts</code> (optional)
+		</h3>
+		<p>
+			Model tools for this agent, merged into one ToolSet by{" "}
+			<code>agentTools(this)</code>. The filename picks the runtime:{" "}
+			<code>tools.ts</code> runs in workerd and deploys normally,{" "}
+			<code>tools.host.ts</code> runs in the Bun host process (so it gets{" "}
+			<code>Bun.$</code>, <code>Bun.file</code>, <code>bun:sqlite</code>)
+			and cannot be deployed. See{" "}
+			<a href="/docs/guides/agent-tools" class="link-underline">
+				Agent tools
+			</a>.
+		</p>
+
+		<h3>
+			<code>cli.ts</code> (optional, project root)
+		</h3>
+		<p>
+			Default-export a function and the project becomes a runnable program.{" "}
+			<code>ayjnt run</code> boots the worker under a local workerd and
+			calls it in the foreground, handing it real in-process Durable Object
+			stubs. It runs in Bun, not workerd. See{" "}
+			<a href="/docs/guides/cli-file" class="link-underline">
+				The cli.ts file
+			</a>.
 		</p>
 
 		<h3>

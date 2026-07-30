@@ -63,6 +63,9 @@ Save it, and `ayjnt dev` picks it up — no config, no registration, no migratio
 | `agents/app.tsx` | Optional **home page**, served at `/`. The root UI — composes any agent through its typed hook, gated by the root `middleware.ts`. |
 | `agents/<route>/docs.md` | Optional markdown docs, served at `/<route>/docs` behind the same middleware as the agent. |
 | `agents/**/middleware.ts` | Hono-style middleware for every descendant agent. Files chain root → leaf, like Next.js layouts. |
+| `agents/<route>/tools.ts` | Optional model tools that run **in workerd**, next to the agent. Deploy like any other worker code. |
+| `agents/<route>/tools.host.ts` | Optional model tools that run **on the Bun host**, so they can use `Bun.$`, `Bun.file`, `bun:sqlite`. Cannot be deployed to Cloudflare. |
+| `cli.ts` | Optional root-level program. `ayjnt run` (and a compiled binary) boots the worker and calls it in the foreground; when it returns, everything stops. |
 | `agents/(group)/` | Route group — stripped from the URL, but its `middleware.ts` still applies. |
 | `export const agentId = "..."` | Optional stable ID in `agent.ts`, so renaming the folder preserves the DO's storage. |
 
@@ -72,11 +75,13 @@ Save it, and `ayjnt dev` picks it up — no config, no registration, no migratio
 |---|---|
 | `ayjnt new <dir>` | Scaffold a project. UI included by default; `--empty` for a bare, no-UI starter. |
 | `ayjnt dev` | Codegen, then `wrangler dev`. |
+| `ayjnt run` | Run the app on ayjnt's own local runtime, including `cli.ts`. The same code path a compiled binary uses. |
 | `ayjnt build` | Pure codegen — writes `.ayjnt/` (wrangler config, worker entry, typed hooks, env types). |
+| `ayjnt compile` | Build a self-contained executable — agents, UIs, `cli.ts`, the Bun runtime and workerd in one file. |
 | `ayjnt migrate` | Preview the pending DO migration without writing anything. |
 | `ayjnt deploy` | Git-safety checks, build, then `wrangler deploy`. |
 
-All commands accept `--cwd <path>` and forward unknown flags to wrangler (e.g. `ayjnt dev --port 8788`).
+`dev`, `build`, `migrate` and `deploy` accept `--cwd <path>` and forward unknown flags to wrangler (e.g. `ayjnt dev --port 8788`). `run` and `compile` have their own flags — see `ayjnt run --help` — and `run` passes anything after `--` to your `cli.ts`.
 
 ## What you can build
 
@@ -93,8 +98,33 @@ Each feature is one file or one import away. The linked example is a complete, r
 - **Email** — define `async onEmail(message)` and ayjnt wires Cloudflare Email Routing so the agent can receive and reply. → [`examples/email-bot`](./examples/email-bot)
 - **Web browsing** — import `browserTools` from `ayjnt/browser` to give an LLM a real browser via Cloudflare Browser Rendering. → [`examples/browser-tools`](./examples/browser-tools)
 - **Agent catalog** — `GET /__ayjnt/catalog` returns a JSON tree of every agent the caller can reach, with its `@callable` methods and docs — filtered by middleware, so gated agents stay hidden. → [`examples/catalog`](./examples/catalog)
+- **Model tools, in either runtime** — `tools.ts` next to an agent runs in workerd; `tools.host.ts` runs on the Bun host so a tool can shell out or read a local file. Both merge into one `ToolSet` via `agentTools(this)`. → [`examples/compiled-cli`](./examples/compiled-cli)
+- **A single-file executable** — `ayjnt compile` packs your agents, their UIs, `cli.ts`, the Bun runtime and workerd into one binary that runs with no Bun, no `node_modules` and no wrangler. → [`examples/compiled-cli`](./examples/compiled-cli)
 
 For bigger end-to-end apps — multiplayer games, AI chatbots, RAG pipelines, multi-agent systems — browse the full gallery in [`examples/`](./examples).
+
+## Two targets
+
+The same agents ship two ways, and they are not equivalent.
+
+**`ayjnt deploy`** puts them on Cloudflare's edge: globally distributed, scales
+to zero, Durable Objects backed by real infrastructure.
+
+**`ayjnt compile`** produces a single executable that carries the Bun runtime and
+workerd inside it. It needs no Bun, no `node_modules`, and no wrangler to run —
+and it has **strictly more capability** than the edge, because a `cli.ts` and a
+`tools.host.ts` run in a Bun process alongside the Workers runtime. An agent can
+hold Durable Object state, run a workflow, serve a React UI, *and* read a local
+file or shell out to git.
+
+That extra capability is exactly why host tools can't be deployed: there is no
+host process on Cloudflare, so `ayjnt deploy` refuses a project containing a
+`tools.host.ts` rather than shipping something that faults on its first tool call.
+
+The cost of compiling is size — roughly 170MB, most of it workerd — and that
+Workers AI, Browser Rendering and email sending remain remote services needing
+network access and credentials. `--no-embed-workerd` trades self-containment for
+about 67MB.
 
 ## Deploys and migrations
 

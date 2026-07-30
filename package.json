@@ -48,6 +48,30 @@
       "types": "./dist/workflow.d.ts",
       "import": "./dist/workflow.js",
       "default": "./dist/workflow.js"
+    },
+    "./cli": {
+      "bun": "./src/runtime/cliContext.ts",
+      "types": "./dist/cliContext.d.ts",
+      "import": "./dist/cliContext.js",
+      "default": "./dist/cliContext.js"
+    },
+    "./tools": {
+      "bun": "./src/runtime/tools.ts",
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js",
+      "default": "./dist/tools.js"
+    },
+    "./internal/run": {
+      "bun": "./src/cli/run.ts",
+      "types": "./dist/run.d.ts",
+      "import": "./dist/run.js",
+      "default": "./dist/run.js"
+    },
+    "./internal/host": {
+      "bun": "./src/cli/host.ts",
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js",
+      "default": "./dist/host.js"
     }
   },
   "files": [
@@ -77,11 +101,19 @@
     "wrangler": "4.82.1"
   },
   "peerDependencies": {
-    "agents": "^0.13.1"
+    "agents": "^0.13.1",
+    "ai": "^6.0.0",
+    "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "agents": {
       "optional": false
+    },
+    "ai": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
     }
   },
   "devDependencies": {

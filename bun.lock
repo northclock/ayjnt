@@ -19,7 +19,13 @@
       },
       "peerDependencies": {
         "agents": "^0.13.1",
+        "ai": "^6.0.0",
+        "zod": "^4.0.0",
       },
+      "optionalPeers": [
+        "ai",
+        "zod",
+      ],
     },
   },
   "packages": {

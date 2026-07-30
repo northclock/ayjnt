@@ -142,6 +142,34 @@ export function generateEntry(
     .map(([file, i]) => `import __ayjnt_mw_${i} from "${toImportSpec(outDir, file)}";`)
     .join("\n");
 
+  // Workerd-side tool collections (`agents/<route>/tools.ts`). Imported as a
+  // namespace and pinned to the agent's prototype, the same way workflow
+  // bindings are, so `agentTools(this)` can find them without the user wiring
+  // anything up. Host-side tools (`tools.host.ts`) are deliberately absent
+  // here: their bodies run in Bun and must never enter the worker bundle —
+  // the worker learns about them at runtime from the __AYJNT_HOST_TOOLS
+  // binding instead.
+  const toolAgents = agents
+    .map((a) => ({
+      agent: a,
+      file: a.tools.find((t) => t.runtime === "worker")?.sourceFile,
+    }))
+    .filter((x): x is { agent: AgentEntry; file: string } => Boolean(x.file));
+
+  const toolImports = toolAgents
+    .map(
+      ({ file }, i) =>
+        `import * as __ayjnt_tools_${i} from "${toImportSpec(outDir, file)}";`,
+    )
+    .join("\n");
+
+  const toolPatches = toolAgents
+    .map(
+      ({ agent }, i) =>
+        `Object.defineProperty(${agentLocal.get(agent)!}.prototype, "__ayjntTools", { value: { ...__ayjnt_tools_${i} }, enumerable: false });`,
+    )
+    .join("\n");
+
   const routeEntries = routes
     .map((a) => {
       const chain = a.middlewareChain
@@ -225,11 +253,13 @@ ${emailImport}${customResolverImport}import {
 ${middlewareImports}
 ${agentImports}
 ${workflowImports}
+${toolImports}
 
 ${agentReexports}
 ${workflowReexports}
 
 ${workflowBindingPatches}
+${toolPatches}
 
 type Binding = ${bindingUnion};
 

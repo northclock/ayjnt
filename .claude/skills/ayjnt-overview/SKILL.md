@@ -13,6 +13,7 @@ UI bundles.
 ## File conventions — the whole API
 
 ```
+cli.ts               # optional — project root; default-exports the program `ayjnt run` invokes
 agents/
   app.tsx            # optional — root home UI, served at /
   middleware.ts      # optional — applies to every descendant agent
@@ -20,6 +21,8 @@ agents/
     agent.ts         # required — default-exports a class extending Agent or McpAgent
     app.tsx          # optional — co-located React UI, served at same URL
     docs.md          # optional — markdown, served at /<route>/docs
+    tools.ts         # optional — model tools running in workerd; deploys normally
+    tools.host.ts    # optional — model tools running on the Bun host; compile-only
   (group)/           # optional — route group; folder name stripped from URL, middleware chains still apply
     <route>/agent.ts
 ```
@@ -66,12 +69,16 @@ export const agentId = "users_v1";
 | Command | What it does |
 |---|---|
 | `bunx ayjnt new <dir>` | Scaffold a fresh project. UI included by default (home page + counter); `--empty` for a bare, no-UI starter. |
-| `bun run dev` (== `ayjnt dev`) | Codegen + `wrangler dev`. |
+| `bun run dev` (== `ayjnt dev`) | Codegen + `wrangler dev`. Does **not** run `cli.ts`. |
+| `ayjnt run` | Codegen + bundle + boot ayjnt's own local workerd, then invoke `cli.ts` in the foreground. Same code path a compiled binary uses. |
 | `bun run build` (== `ayjnt build`) | Pure codegen — writes `.ayjnt/dist/{wrangler.jsonc,entry.ts}` + the typed `useAgent` hooks. |
+| `ayjnt compile` | Self-contained single-file executable (~170MB — Bun + workerd + app). |
 | `bun run migrate` | Preview pending DO-migration entry without writing it. |
 | `bun run deploy` (== `ayjnt deploy`) | Git safety + build + `wrangler deploy`. |
 
-All commands forward unknown flags to wrangler.
+`dev`, `deploy` and `build` forward unknown flags to wrangler. `run` and
+`compile` own their flags; for `run`, arguments after `--` go to `cli.ts`
+as `argv`.
 
 ## The generated `.ayjnt/` tree
 
@@ -112,6 +119,9 @@ should be gitignored.
 | Build an MCP agent (Claude Desktop, Codex, MCP clients). | `ayjnt-mcp` | [`examples/mcp`](../../../examples/mcp) |
 | Add auth or other middleware to a subtree. | `ayjnt-middleware` | [`examples/middleware`](../../../examples/middleware) |
 | Call one agent from another (typed RPC). | `ayjnt-rpc` | [`examples/inter-agent`](../../../examples/inter-agent) |
+| Give the model tools (workerd or Bun host). | `ayjnt-tools` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
+| Turn the project into a runnable program (`cli.ts`). | `ayjnt-cli-file` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
+| Run locally on ayjnt's runtime, or ship a binary. | `ayjnt-compile` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
 | Diagnose a failure mode. | `ayjnt-troubleshoot` | — |
 
 ## Gotchas to keep in mind
@@ -124,3 +134,8 @@ should be gitignored.
   owns the mount.
 - Folder names in parens are route groups: stripped from the URL,
   still contribute to the middleware chain.
+- A locally-running app spans **two runtimes**: `cli.ts` and
+  `tools.host.ts` run in Bun (`Bun.$`, `Bun.file`, `bun:sqlite`),
+  everything under `agents/` runs in workerd (no Bun APIs). `ayjnt
+  deploy` refuses a project containing `tools.host.ts` — there's no
+  host process on Cloudflare.

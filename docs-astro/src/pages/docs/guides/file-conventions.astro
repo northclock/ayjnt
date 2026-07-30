@@ -13,10 +13,10 @@ import { FileTree } from "@/components/react/FileTree.tsx";
 		slug="guides/file-conventions"
 		lede="The folder tree under agents/ is the entire framework configuration. Four file names are special — everything else is yours."
 	>
-		<h2>The four special files</h2>
+		<h2>The special files</h2>
 		<p>
-			ayjnt's scanner walks <code>agents/**/</code> looking for four
-			filenames. Every other file you place in the tree is ignored by the
+			ayjnt's scanner walks <code>agents/**/</code> looking for a fixed set
+			of filenames. Every other file you place in the tree is ignored by the
 			framework itself (though you can still import from them normally).
 		</p>
 
@@ -85,6 +85,32 @@ import { FileTree } from "@/components/react/FileTree.tsx";
 				</tr>
 				<tr>
 					<td>
+						<code>tools.ts</code>
+					</td>
+					<td>
+						Model tools for this agent that run <em>in workerd</em>, and
+						deploy with it. Exports AI-SDK <code>tool()</code>{" "}
+						definitions. See{" "}
+						<a href="/docs/guides/agent-tools" class="link-underline">
+							Agent tools
+						</a>.
+					</td>
+					<td>No</td>
+				</tr>
+				<tr>
+					<td>
+						<code>tools.host.ts</code>
+					</td>
+					<td>
+						Model tools that run <em>in the Bun host process</em> —{" "}
+						<code>Bun.$</code>, <code>Bun.file</code>,{" "}
+						<code>bun:sqlite</code>. Compile-only:{" "}
+						<code>ayjnt deploy</code> refuses a project containing one.
+					</td>
+					<td>No</td>
+				</tr>
+				<tr>
+					<td>
 						<code>middleware.ts</code>
 					</td>
 					<td>
@@ -105,6 +131,26 @@ import { FileTree } from "@/components/react/FileTree.tsx";
 				</tr>
 			</tbody>
 		</table>
+
+		<h2>One convention outside agents/: cli.ts</h2>
+		<p>
+			A <code>cli.ts</code> at the <strong>project root</strong> (a sibling
+			of <code>agents/</code>, not inside it) is optional and turns the
+			project into a runnable program.{" "}
+			<code>ayjnt run</code> — and a binary from{" "}
+			<code>ayjnt compile</code> — boots the worker under a local workerd
+			and calls its default export in the foreground, with real in-process
+			Durable Object stubs for every agent. It runs in Bun rather than
+			workerd, so it can read local files and shell out. See{" "}
+			<a href="/docs/guides/cli-file" class="link-underline">
+				The cli.ts file
+			</a>{" "}
+			and{" "}
+			<a href="/docs/guides/compile" class="link-underline">
+				Compiling to an executable
+			</a>
+			.
+		</p>
 
 		<h2>Folder = agent</h2>
 		<p>

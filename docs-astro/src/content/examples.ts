@@ -3780,6 +3780,195 @@ export default function ConferenceUI() {
 			deployStep("https://my-app.<account>.workers.dev"),
 		],
 	},
+
+	// --- compiled-cli --------------------------------------------------------
+	{
+		slug: "compiled-cli",
+		title: "A CLI in one binary",
+		description:
+			"An agent, its model tools, and a command-line program shipped as a single executable. Covers the root-level cli.ts, tools.ts (workerd) vs tools.host.ts (Bun host), and `ayjnt compile`.",
+		tags: ["cli", "tools", "compile"],
+		status: "stable",
+		exampleDir: "examples/compiled-cli",
+		preview: {
+			kind: "terminal",
+			lines: [
+				"$ ayjnt compile",
+				"✓ ayjnt: notes-app (170MB)",
+				"$ ./notes-app add hello",
+				"added 2b02e3f6…",
+			],
+		},
+		whatYoullLearn: [
+			"How a root-level `cli.ts` turns a project into a runnable program",
+			"How to call agent methods as in-process RPC — no HTTP, no port, no handshake",
+			"Why `tools.ts` runs in workerd and `tools.host.ts` runs in Bun, and when to reach for each",
+			"How host tools gate `write` / `exec` side effects, and why that guards against prompt injection",
+			"Why `ayjnt deploy` refuses a project containing host tools",
+		],
+		steps: [
+			SCAFFOLD_BLANK,
+			{
+				title: "Add a cli.ts at the project root",
+				blurb:
+					"A root-level `cli.ts` default-exports a function. `ayjnt run` boots the worker under a local workerd, calls it in the foreground, then shuts everything down — workerd included — when it returns. Import the context type from the *generated* `@ayjnt/cli`, which types `agents` against your actual classes.",
+				files: [
+					{
+						path: "cli.ts",
+						lang: "ts",
+						code: `import type { AyjntCli } from "@ayjnt/cli";
+
+export default async function ({ agents, argv }: AyjntCli) {
+  const notes = agents.notes("default");
+  const [command, ...rest] = argv;
+
+  if (command === "add") {
+    const note = await notes.addNote(rest.join(" "), "cli");
+    console.log(\`added \${note.id}\`);
+    return;
+  }
+
+  for (const n of await notes.listNotes()) {
+    console.log(\`• \${n.text}  (\${n.source})\`);
+  }
+}`,
+						highlightLines: [4, 8, 13],
+					},
+				],
+			},
+			{
+				title: "Run it — arguments after `--` reach cli.ts",
+				blurb:
+					"`agents.notes(...)` is a real Durable Object stub, so `addNote` is RPC straight into workerd. That works because `cli.ts` runs in the same process that owns the runtime. Unlike `ayjnt dev`, which wraps `wrangler dev`, `ayjnt run` is byte-for-byte the code path a compiled binary uses.",
+				terminal: [
+					{ kind: "command", text: "bun run start add hello world" },
+					{ kind: "output", text: "[ayjnt] serving on http://127.0.0.1:8787" },
+					{ kind: "success", text: "added 2b02e3f6-d97f-4ff8-8e28-11ede840b67d" },
+					{ kind: "command", text: "bun run start list" },
+					{ kind: "output", text: "• hello world  (cli)" },
+				],
+			},
+			{
+				title: "Add model tools — one file per runtime",
+				blurb:
+					"`tools.ts` runs inside workerd next to the agent and deploys normally. `tools.host.ts` runs in the Bun process, so it can use `Bun.$`, `Bun.file` and `bun:sqlite` — things workerd has no answer for. There is deliberately no `\"use host\"` directive: the filename is the declaration. `sideEffects` is required, because the arguments come from model output.",
+				files: [
+					{
+						path: "agents/notes/tools.ts",
+						lang: "ts",
+						code: `import { tool } from "ai";
+import { z } from "zod";
+
+// Runs in workerd. Pure computation — no reason to leave the runtime.
+export const countWords = tool({
+  description: "Count the words in a piece of text.",
+  inputSchema: z.object({ text: z.string() }),
+  execute: async ({ text }) => ({
+    words: text.trim().split(/\\s+/).filter(Boolean).length,
+  }),
+});`,
+					},
+					{
+						path: "agents/notes/tools.host.ts",
+						lang: "ts",
+						code: `import { confinePath, hostTool } from "ayjnt/tools";
+import { z } from "zod";
+
+const ROOT = process.cwd();
+
+// Runs on the Bun host. \`confinePath\` matters: the path comes from a model.
+export const readProjectFile = hostTool({
+  description: "Read a text file from the project directory.",
+  sideEffects: "read",
+  inputSchema: z.object({ path: z.string() }),
+  execute: async ({ path }: { path: string }) =>
+    await Bun.file(confinePath(ROOT, path)).text(),
+});`,
+						highlightLines: [9, 12],
+					},
+					{
+						path: "agents/notes/agent.ts",
+						lang: "ts",
+						code: `import { agentTools } from "ayjnt/tools";
+
+// Both kinds merge into one AI-SDK ToolSet. The agent doesn't know or care
+// which runtime a tool lives in.
+const tools = { ...browserTools(this), ...agentTools(this) };
+const result = await generateText({ model, tools, messages });`,
+						highlightLines: [5],
+					},
+				],
+			},
+			{
+				title: "Host tools need permission for anything dangerous",
+				blurb:
+					"`read` runs freely; `write` and `exec` are refused unless you opt in. This is not ceremony — if an agent ever reads untrusted content (an inbound email, a retrieved document, a fetched page), attacker-controlled text can reach a function that runs `Bun.$` on your machine.",
+				terminal: [
+					{
+						kind: "command",
+						text: "bun run start tool notes__appendToLog '{\"line\":\"hi\"}'",
+					},
+					{
+						kind: "error",
+						text: 'tool failed: host tool appendToLog declares sideEffects: "write", which is not permitted. Re-run with --allow-host-writes.',
+					},
+					{
+						kind: "command",
+						text: "bun run start tool notes__readProjectFile '{\"path\":\"../../../etc/passwd\"}'",
+					},
+					{
+						kind: "error",
+						text: 'tool failed: path "../../../etc/passwd" escapes the permitted directory',
+					},
+				],
+			},
+			{
+				title: "Compile it",
+				blurb:
+					"One file containing your agents, their UIs, `cli.ts`, the host tools, the Bun runtime and workerd. It runs on a machine with no Bun, no node_modules and no wrangler. Durable Object state persists in a per-app OS directory, so `add` today and `list` tomorrow behave the way a user expects.",
+				terminal: [
+					{ kind: "command", text: "bun run compile" },
+					{ kind: "output", text: "[ayjnt] bundling worker (wrangler --dry-run)…" },
+					{ kind: "output", text: "[ayjnt] embedding workerd (103MB)" },
+					{ kind: "success", text: "✓ ayjnt: notes-app (170MB)" },
+					{ kind: "command", text: "./notes-app add shipped as one file" },
+					{ kind: "success", text: "added 7c9db569-2ffa-4375-b19d-b184a7e9934d" },
+				],
+				screenshot: {
+					label: "Two runtimes, one binary",
+					content: `┌─ notes-app (one executable, ~170MB) ─────────────────┐
+│                                                      │
+│  ┌─ Bun process ──────────┐  ┌─ workerd ──────────┐  │
+│  │ cli.ts                 │  │ agents/notes/      │  │
+│  │   Bun.$  Bun.file      │  │   agent.ts         │  │
+│  │   bun:sqlite  argv     │  │   tools.ts         │  │
+│  │                        │  │                    │  │
+│  │ tools.host.ts          │  │ DO state, alarms,  │  │
+│  │   readProjectFile      │  │ setState, workflows│  │
+│  └────────────┬───────────┘  └─────────┬──────────┘  │
+│               │   in-process DO RPC    │             │
+│               │◀───────────────────────┤             │
+│               │   __AYJNT_HOST bridge  │             │
+│               ├───────────────────────▶│             │
+└──────────────────────────────────────────────────────┘
+   cli.ts returns ──▶ everything stops, workerd included`,
+				},
+			},
+			{
+				title: "…but you cannot deploy it",
+				blurb:
+					"A deployed Cloudflare worker has no host process, so `tools.host.ts` has nowhere to run. Failing at deploy time beats the alternatives: silently omitting the tools gives the same agent different capabilities in production with nothing to indicate it, and deploying throwing stubs turns a build error into a production incident. Move the functions into `tools.ts`, ship with `ayjnt compile`, or mark the file `@ayjnt-optional-on-deploy` if the agent works without them.",
+				terminal: [
+					{ kind: "command", text: "bun run deploy" },
+					{
+						kind: "error",
+						text: "cannot deploy: 1 host tool file(s) would not work in production.",
+					},
+					{ kind: "output", text: "  agents/notes/tools.host.ts  (/notes)" },
+				],
+			},
+		],
+	},
 ];
 
 export function getExample(slug: string): ExampleMeta | undefined {

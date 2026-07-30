@@ -1,0 +1,392 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Compiling to an executable — ayjnt docs"
+	description="ayjnt compile packs agents, UIs, cli.ts, host tools, the Bun runtime and workerd into one file. Size, flags, how it works, where state lives, and what doesn't survive."
+>
+	<DocPageShell
+		slug="guides/compile"
+		lede="ayjnt compile produces a single self-contained executable: your agents, their bundled UIs, cli.ts, host tools, the Bun runtime, and workerd. Running it needs no Bun, no node_modules, and no wrangler."
+	>
+		<h2>The happy path</h2>
+		<CodeBlock
+			lang="sh"
+			code={`$ ayjnt compile
+[ayjnt] embedding workerd (103MB)
+[ayjnt] compiling → notes
+✓ ayjnt: notes (170MB)
+  cli.ts runs in the foreground; workerd stops when it returns.
+  1 host tool file(s) embedded — these work here but cannot be deployed.
+
+$ ./notes add "hello from a binary"
+added 0c4f1b7e-…`}
+		/>
+		<p>
+			The output is a normal executable. Copy it to another machine of the
+			same platform and it runs — there is nothing to install alongside it.
+		</p>
+
+		<h2>Size, stated plainly</h2>
+		<p>
+			The default binary is <strong>~170MB</strong>: roughly 57MB of Bun,
+			103MB of workerd, and your app code. That is the honest cost of
+			shipping two runtimes in one file, and it isn't going to shrink much
+			— both halves are real runtimes.
+		</p>
+		<p>
+			<code>--no-embed-workerd</code> brings it down to about 67MB, but the
+			binary then needs a workerd on the host and{" "}
+			<code>AYJNT_WORKERD_PATH</code> pointing at it. That's a reasonable
+			trade for internal tooling on machines you control, and a bad one for
+			anything you hand to someone else — the whole point of the default is
+			that there is nothing to install.
+		</p>
+
+		<h2>Flags</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Flag</th>
+					<th>Effect</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>--outfile &lt;path&gt;</code>
+					</td>
+					<td>
+						Output path. Default{" "}
+						<code>./&lt;worker-name&gt;</code>, taken from the
+						generated wrangler config.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--target &lt;bun-target&gt;</code>
+					</td>
+					<td>
+						Bun compile target, e.g. <code>bun-linux-x64</code>. See
+						cross-compiling in the limitations below.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--no-embed-workerd</code>
+					</td>
+					<td>
+						Leave workerd out (~67MB). Needs{" "}
+						<code>AYJNT_WORKERD_PATH</code> at runtime.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--bytecode</code>
+					</td>
+					<td>Precompile to bytecode for faster startup.</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--minify</code>
+					</td>
+					<td>Minify the embedded JavaScript.</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--cwd &lt;path&gt;</code>
+					</td>
+					<td>Project root.</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>How it works</h2>
+		<ol>
+			<li>
+				<strong>Codegen, exactly as usual.</strong> The same{" "}
+				<code>.ayjnt/</code> tree that <code>ayjnt build</code> writes.
+			</li>
+			<li>
+				<strong>Real wrangler bundles the worker.</strong> ayjnt shells
+				out to <code>wrangler deploy --dry-run --outdir</code> while{" "}
+				<code>node_modules</code> is still available, so the bundle gets
+				wrangler's own esbuild plus the{" "}
+				<code>@cloudflare/unenv-preset</code>{" "}
+				<code>nodejs_compat</code> treatment.{" "}
+				<strong>The framework never bundles worker code itself</strong> —
+				that keeps bundling fidelity out of the risk surface entirely.
+				Whatever wrangler would deploy is what gets embedded.
+			</li>
+			<li>
+				<strong>
+					<code>bun build --compile</code> embeds everything:
+				</strong>{" "}
+				the worker script, the assets tree, <code>cli.ts</code>, every{" "}
+				<code>tools.host.ts</code>, and (by default) the workerd binary.
+			</li>
+		</ol>
+
+		<h3>Why the workerd module gets aliased</h3>
+		<p>
+			<code>miniflare</code> does a top-level{" "}
+			<code>require("workerd")</code>, and that package resolves its native
+			binary through <code>require.resolve</code>{" "}
+			<em>at module-load time</em>. Inside a compiled binary there is no{" "}
+			<code>node_modules</code>, so the import throws{" "}
+			<code>Cannot find package 'workerd'</code> before miniflare's own
+			override is ever consulted.
+		</p>
+		<Callout kind="note" title="MINIFLARE_WORKERD_PATH is not enough">
+			<p>
+				The env var is read too late — the module has already failed to
+				load. <code>ayjnt compile</code> aliases the{" "}
+				<code>workerd</code> module to a generated stub that reports the
+				path the bootstrap extracted to. This is the main reason to use{" "}
+				<code>ayjnt compile</code> rather than hand-rolling a{" "}
+				<code>bun build --compile</code>.
+			</p>
+		</Callout>
+		<p>
+			A second, smaller reason: <code>import()</code> can't reach into a
+			binary, so anything loaded dynamically —{" "}
+			<code>cli.ts</code>, <code>tools.host.ts</code> — has to be imported{" "}
+			<em>statically</em> by a generated bootstrap for Bun's bundler to see
+			and include it.
+		</p>
+
+		<h2>What happens when you run it</h2>
+		<p>
+			On first launch the binary extracts workerd into a per-app cache
+			directory, keyed by version. That's a ~103MB write, and it happens
+			once — later runs find it and skip straight through. After that,
+			startup is comfortably under a second. Then the binary calls the same{" "}
+			<code>runApp</code> that{" "}
+			<a href="/docs/guides/cli-file" class="link-underline">
+				<code>ayjnt run</code>
+			</a>{" "}
+			does, with inputs read out of the executable instead of off disk.
+		</p>
+		<p>
+			The binary claims only four flags for itself. Everything else becomes{" "}
+			<code>argv</code> for your <code>cli.ts</code>:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Flag</th>
+					<th>Effect</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>--port &lt;n&gt;</code>
+					</td>
+					<td>
+						Port to bind. Default <code>8787</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--data-dir &lt;path&gt;</code>
+					</td>
+					<td>
+						Where Durable Object state is persisted.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--allow-host-writes</code>
+					</td>
+					<td>
+						Permit host tools declaring{" "}
+						<code>sideEffects: "write"</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--allow-host-exec</code>
+					</td>
+					<td>
+						Permit host tools declaring{" "}
+						<code>sideEffects: "exec"</code>.
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			If your <code>cli.ts</code> wants a flag of the same name, put it after
+			an explicit <code>--</code> and the whole remainder is handed through
+			untouched.
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`./notes --port 9000 add "hello"     # --port is the app's; the rest is argv
+./notes --allow-host-writes tool appendToLog '{"line":"hi"}'
+./notes list`}
+		/>
+
+		<h2>Where state lives</h2>
+		<p>
+			A compiled ayjnt app is a shipped program, not a dev server, so
+			Durable Object state has to outlive a single run and survive the
+			binary being moved. That rules out both{" "}
+			<code>.wrangler/state</code> (tied to a project checkout) and a temp
+			directory. State goes in a per-app OS state directory, keyed by worker
+			name so two apps never share storage:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Platform</th>
+					<th>Location</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>macOS</td>
+					<td>
+						<code>~/Library/Application Support/ayjnt/&lt;worker&gt;</code>
+					</td>
+				</tr>
+				<tr>
+					<td>Linux</td>
+					<td>
+						<code>$XDG_STATE_HOME/ayjnt/&lt;worker&gt;</code>, else{" "}
+						<code>~/.local/state/ayjnt/&lt;worker&gt;</code>
+					</td>
+				</tr>
+				<tr>
+					<td>Windows</td>
+					<td>
+						<code>%LOCALAPPDATA%\ayjnt\&lt;worker&gt;</code>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			Override it with <code>--data-dir &lt;path&gt;</code> or{" "}
+			<code>AYJNT_DATA_DIR</code>; both <code>ayjnt run</code> and the
+			compiled binary accept either. State survives across runs and across
+			moving the binary, which is what makes{" "}
+			<code>./notes add</code> today and <code>./notes list</code> tomorrow
+			behave the way a user expects.
+		</p>
+
+		<h2>Limitations</h2>
+		<Callout kind="warn" title="Four things to know before you ship a binary">
+			<p>
+				<strong>Browser tools don't work.</strong>{" "}
+				<a href="/docs/guides/browser" class="link-underline">
+					<code>ayjnt/browser</code>
+				</a>{" "}
+				needs a <code>worker_loaders</code> binding, and Miniflare has no
+				equivalent — so browser tools fail in a compiled binary. Compile
+				warns about it at build time. Everything else in the app still
+				works; use <code>ayjnt dev</code> or a deployed worker when you
+				need browser tools.
+			</p>
+			<p>
+				<strong>
+					Workers AI, Browser Rendering, and email sending are remote
+					services.
+				</strong>{" "}
+				The binary is self-contained <em>as a runtime</em>, but these
+				still need network access and Cloudflare credentials. Compile
+				warns about whichever of them your config uses.
+			</p>
+			<p>
+				<strong>Cross-compiling needs the target's workerd.</strong>{" "}
+				<code>--target</code> swaps Bun's runtime, but the embedded
+				workerd is a native binary that must match the{" "}
+				<em>target</em> platform. Only the host's{" "}
+				<code>@cloudflare/workerd-&lt;platform&gt;</code> is installed by
+				default, so compile fails with install instructions rather than
+				embedding the wrong binary — which would build cleanly and die on
+				first launch.
+			</p>
+			<p>
+				<strong>macOS distribution needs codesigning</strong> — for both
+				the outer binary and the workerd it extracts.
+			</p>
+		</Callout>
+		<CodeBlock
+			lang="sh"
+			code={`# Cross-compiling for Linux from a Mac:
+bun add -d @cloudflare/workerd-linux-64
+ayjnt compile --target bun-linux-x64`}
+		/>
+
+		<h2>compile vs deploy</h2>
+		<p>
+			Same agents, two different targets — and the capability sets are not
+			nested the way you might guess.
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th></th>
+					<th>
+						<code>ayjnt deploy</code>
+					</th>
+					<th>
+						<code>ayjnt compile</code>
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>Where it runs</td>
+					<td>Cloudflare's edge</td>
+					<td>The user's machine</td>
+				</tr>
+				<tr>
+					<td>
+						Host tools (<code>tools.host.ts</code>)
+					</td>
+					<td>No — refuses to deploy</td>
+					<td>Yes</td>
+				</tr>
+				<tr>
+					<td>
+						Local files, subprocesses, native{" "}
+						<code>bun:sqlite</code>
+					</td>
+					<td>No</td>
+					<td>Yes</td>
+				</tr>
+				<tr>
+					<td>
+						Browser tools (<code>ayjnt/browser</code>)
+					</td>
+					<td>Yes</td>
+					<td>No</td>
+				</tr>
+				<tr>
+					<td>Scale, TLS, global routing</td>
+					<td>Cloudflare's</td>
+					<td>Yours</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			<code>ayjnt deploy</code> ships to the edge and cannot run host
+			tools, because there is no host process out there.{" "}
+			<code>ayjnt compile</code> produces a local-first app with{" "}
+			<strong>strictly more capability than Cloudflare</strong> for
+			everything that touches the machine: local files, subprocesses,
+			native SQLite. Pick per artifact, not per project — the same{" "}
+			<code>agents/</code> tree can be both, as long as the agents tolerate
+			a smaller ToolSet when deployed. See{" "}
+			<a href="/docs/guides/agent-tools" class="link-underline">
+				Agent tools
+			</a>{" "}
+			for the <code>@ayjnt-optional-on-deploy</code> marker that makes that
+			explicit.
+		</p>
+	</DocPageShell>
+</DocsLayout>

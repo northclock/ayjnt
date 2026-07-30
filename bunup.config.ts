@@ -27,6 +27,13 @@ const external = [
   "wrangler",
   "react",
   "react-dom",
+  // AI SDK + zod are optional peers, used only by the tools runtime.
+  "ai",
+  "zod",
+  // Local runtime: only reached by `ayjnt run` / a compiled binary, and
+  // resolved from the consumer's install (or aliased at compile time).
+  "miniflare",
+  "workerd",
   // Cloudflare-specific module namespace, runtime-resolved by workerd.
   /^cloudflare:/,
 ];
@@ -51,7 +58,48 @@ export default defineConfig([
     external,
   },
   {
-    name: "cli",
+    // The newer runtime entries live in their own block rather than joining
+    // "runtime" above. Past eight entries in a single block, bunup starts
+    // preserving the full source structure — emitting dist/src/runtime/*.js
+    // instead of flat dist/*.js — which silently invalidates every
+    // ./dist/*.js path in package.json's exports map. Splitting keeps each
+    // block's output flat. Verified by bisection; re-check the dist layout if
+    // you add entries here.
+    name: "runtime-tools",
+    entry: ["src/runtime/cliContext.ts", "src/runtime/tools.ts"],
+    outDir: "dist",
+    format: ["esm"],
+    target: "node",
+    dts: true,
+    clean: false,
+    external,
+  },
+  {
+    // The local runtime, reached through the `ayjnt/internal/*` exports by the
+    // bootstrap that `ayjnt compile` generates. Not public API — it's exported
+    // only because a compiled binary's entry module has to import it by
+    // specifier like any other consumer.
+    //
+    // Separate from the "runtime" block because these use Bun APIs (Bun.file,
+    // Bun.spawn, Bun.pathToFileURL) and so must be compiled for `bun`, not
+    // `node`. They're Bun-only by nature: `ayjnt run` and compiled binaries
+    // both execute under Bun.
+    name: "internal",
+    entry: ["src/cli/run.ts", "src/cli/host.ts"],
+    outDir: "dist",
+    format: ["esm"],
+    target: "bun",
+    dts: true,
+    clean: false,
+    external,
+  },
+  {
+    // Named "bin", not "cli": bunup keys some internal bookkeeping off the
+    // block name, and a block called "cli" alongside a `src/runtime/cli.ts`
+    // entry makes it emit the runtime into `dist/src/runtime/` instead of
+    // flat `dist/`, silently breaking every `./dist/*.js` path in
+    // package.json's exports map.
+    name: "bin",
     entry: ["bin/ayjnt.ts"],
     outDir: "dist",
     format: ["esm"],

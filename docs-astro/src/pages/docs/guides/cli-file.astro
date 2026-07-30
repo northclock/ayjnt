@@ -1,0 +1,507 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="The cli.ts file — ayjnt docs"
+	description="An optional root-level cli.ts makes an ayjnt project a runnable program: real in-process Durable Object RPC from Bun, with agents still running in workerd."
+>
+	<DocPageShell
+		slug="guides/cli-file"
+		lede="Drop a cli.ts at the project root and the app stops being only a server. ayjnt run boots the worker under a local workerd, calls your function in the foreground, and tears everything down when it settles."
+	>
+		<h2>The shape</h2>
+		<p>
+			Default-export a function. It receives one context object and can be
+			async. When it returns, the runtime shuts down — workerd included.
+		</p>
+		<CodeBlock
+			filename="cli.ts"
+			lang="ts"
+			code={`import type { AyjntCli } from "@ayjnt/cli";
+
+export default async function ({ agents, argv }: AyjntCli) {
+  const notes = agents.notes("default");
+  const [command, ...rest] = argv;
+
+  if (command === "add") {
+    const note = await notes.addNote(rest.join(" "), "cli");
+    console.log(\`added \${note.id}\`);
+    return;
+  }
+
+  for (const n of await notes.listNotes()) console.log(\`• \${n.text}\`);
+}`}
+			highlightLines={[1]}
+		/>
+		<p>
+			Note where the type comes from:{" "}
+			<strong>the generated module</strong>, not the framework package.
+			Codegen emits a project-specific <code>@ayjnt/cli</code> whose{" "}
+			<code>agents</code> and <code>workflows</code> maps are typed against
+			your actual agent classes, so <code>notes.addNote(...)</code>{" "}
+			autocompletes and type-checks. Importing a generic type from{" "}
+			<code>ayjnt</code> would give you none of that. If you'd rather
+			infer the context than name its type,{" "}
+			<code>defineCli</code> from <code>"ayjnt/cli"</code> is an equivalent
+			identity helper.
+		</p>
+		<CodeBlock lang="sh" code={`ayjnt run -- add hello world`} />
+		<p>
+			Everything after <code>--</code> reaches <code>cli.ts</code> as{" "}
+			<code>argv</code>. The framework claims none of those arguments.
+		</p>
+
+		<h2>The context</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Field</th>
+					<th>What it is</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>agents</code>
+					</td>
+					<td>
+						Route-nested accessors returning a handle per agent
+						instance. Real Durable Object stubs.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>workflows</code>
+					</td>
+					<td>
+						Workflow bindings, keyed by camelized workflow name.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>env</code>
+					</td>
+					<td>
+						Every binding on the worker's <code>env</code>, proxied
+						into this process. Escape hatch for bindings without a
+						nicer accessor.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>argv</code>
+					</td>
+					<td>
+						<code>process.argv.slice(2)</code> — the arguments after{" "}
+						<code>--</code>, or after the binary name.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>url</code>
+					</td>
+					<td>
+						Origin the worker is listening on, e.g.{" "}
+						<code>http://localhost:8787</code>. Handy for printing a
+						link.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>fetch(path, init?)</code>
+					</td>
+					<td>
+						HTTP into the worker. A path resolves against{" "}
+						<code>url</code>, so <code>fetch("/counter/demo")</code>{" "}
+						works. Goes through routing and middleware exactly as an
+						external client would.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>stop()</code>
+					</td>
+					<td>
+						Request shutdown. Mainly for breaking out of a long-lived{" "}
+						<code>watch</code> loop.
+					</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>Two runtimes in one app</h2>
+		<p>
+			This is the part worth internalizing, because it explains both what{" "}
+			<code>cli.ts</code> is for and why some APIs work in one file and not
+			the other.
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th></th>
+					<th>
+						<code>cli.ts</code>
+					</th>
+					<th>
+						<code>agents/**/agent.ts</code>
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>Runtime</td>
+					<td>Bun</td>
+					<td>workerd</td>
+				</tr>
+				<tr>
+					<td>Available</td>
+					<td>
+						<code>Bun.$</code>, <code>Bun.file</code>,{" "}
+						<code>bun:sqlite</code>, <code>node:fs</code>, argv,
+						stdin/TTY
+					</td>
+					<td>
+						Durable Object storage, <code>setState</code>, alarms,
+						workflows
+					</td>
+				</tr>
+				<tr>
+					<td>Not available</td>
+					<td>DO storage, <code>setState</code>, alarms</td>
+					<td>Every Bun API above</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			That asymmetry <em>is the point</em>. <code>cli.ts</code> can read a
+			local file, shell out to git, or open a native SQLite database, and
+			feed the results into agents that live in workerd:
+		</p>
+		<CodeBlock
+			filename="cli.ts"
+			lang="ts"
+			code={`// Bun-native work feeding straight into agent state: read a local file
+// here in Bun, store it in a Durable Object over there in workerd.
+const text = await Bun.file(rest[0]!).text();
+for (const line of text.split("\\n").map((l) => l.trim()).filter(Boolean)) {
+  await notes.addNote(line, rest[0]!);
+}`}
+		/>
+		<p>
+			The same split is available to model tools —{" "}
+			<code>tools.host.ts</code> runs in Bun for exactly this reason. See{" "}
+			<a href="/docs/guides/agent-tools" class="link-underline">
+				Agent tools
+			</a>
+			.
+		</p>
+
+		<h2>The agents accessor</h2>
+		<p>
+			Accessors mirror your <code>agents/</code> tree, route-nested and
+			camelized:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Folder</th>
+					<th>Accessor</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>agents/counter</code>
+					</td>
+					<td>
+						<code>agents.counter("demo")</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/admin/users</code>
+					</td>
+					<td>
+						<code>agents.admin.users("u1")</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/my-notes</code>
+					</td>
+					<td>
+						<code>agents.myNotes("n1")</code>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			The argument is the instance name — the same id that appears in the
+			URL as <code>/counter/demo</code>. Omit it and you get{" "}
+			<code>"default"</code>.
+		</p>
+
+		<h3>Method calls are real RPC, in-process</h3>
+		<p>
+			A handle is a genuine Durable Object stub. Calling{" "}
+			<code>await notes.addNote("hi")</code> is a Durable Object RPC into
+			workerd: <strong>no HTTP, no port, no client handshake, no URL to
+			construct.</strong> That works because <code>cli.ts</code> runs in
+			the same process that owns the runtime — under{" "}
+			<code>wrangler dev</code> there is no handle to ask for.
+		</p>
+		<p>
+			Arguments and return values cross the boundary the same way they do
+			for{" "}
+			<a href="/docs/guides/inter-agent-rpc" class="link-underline">
+				inter-agent RPC
+			</a>
+			: structured-cloneable data.
+		</p>
+		<p>
+			On top of the class's own methods, every handle carries two extras:{" "}
+			<code>.fetch(path?, init?)</code> for raw HTTP into that instance
+			(through the middleware chain, exactly as an external client would),
+			and <code>.watch(cb)</code> for live state pushes.
+		</p>
+
+		<h3>cli.ts is a privileged peer</h3>
+		<p>
+			It can call <strong>any public method</strong> on the agent class, not
+			just the <code>@callable</code> ones. This is deliberate:{" "}
+			<code>cli.ts</code> runs inside the same binary as the agent, so it
+			gets the same full-surface access that inter-agent{" "}
+			<code>getAgent&lt;T&gt;()</code> has.{" "}
+			<code>@callable</code> stays what it always was — the marker for{" "}
+			<em>browser</em> exposure.
+		</p>
+
+		<h3>watch() — the one thing that isn't plain RPC</h3>
+		<p>
+			State pushes travel over the agent WebSocket protocol rather than the
+			RPC channel, so <code>watch()</code> lazily opens a connection to the
+			bound port. It returns an unsubscribe function, and the framework
+			also closes any open watchers during teardown.
+		</p>
+		<CodeBlock
+			filename="cli.ts"
+			lang="ts"
+			code={`const unsubscribe = await notes.watch((state) => {
+  console.log(\`[state] \${state.notes.length} note(s)\`);
+});
+
+// Returning from cli.ts tears the runtime down, so wait for a signal.
+await new Promise(() => {});`}
+		/>
+
+		<h2>Workflows</h2>
+		<p>
+			<code>workflows</code> is keyed by camelized workflow name, and each
+			entry is the same binding surface a worker sees on{" "}
+			<code>env.&lt;WORKFLOW&gt;</code>:
+		</p>
+		<CodeBlock
+			filename="cli.ts"
+			lang="ts"
+			code={`const run = await workflows.dataImporter.create({
+  params: { source: "notes.txt" },
+});
+console.log(run.id, await run.status());`}
+		/>
+		<p>
+			This is more than a convenience.{" "}
+			<a href="/docs/guides/workflows" class="link-underline">
+				Workflows
+			</a>{" "}
+			have no HTTP surface in the generated worker at all, so in-process
+			bindings are the only way to trigger one from outside an agent.
+		</p>
+
+		<h2>Errors: return, don't throw</h2>
+		<Callout kind="warn" title="Exceptions from agent methods lose their message">
+			<p>
+				If an agent method <strong>throws</strong> while called from{" "}
+				<code>cli.ts</code>, the local runtime cannot forward the reason.
+				This is a Miniflare limitation: workerd returns a 4xx for an
+				application error, and Miniflare's host-side Durable Object proxy
+				asserts on the status before it ever reads the body, so the real
+				message is discarded upstream. Worker-to-DO calls are unaffected —
+				this is specific to calling <em>in</em> from the host, which is
+				exactly what <code>cli.ts</code> does.
+			</p>
+			<p>
+				Rather than surface a bare{" "}
+				<code>AssertionError: false == true</code> from deep inside
+				miniflare, ayjnt replaces it with an error naming the agent, the
+				method, and the workarounds.
+			</p>
+		</Callout>
+		<p>Two ways out, both worth adopting as a habit:</p>
+		<ol>
+			<li>
+				<strong>Return results instead of throwing.</strong>{" "}
+				<code>{"{ ok: false, error: string }"}</code> keeps the reason
+				intact — and it's the right shape for tool calls anyway, since a
+				model can usually recover from a clear message.
+			</li>
+			<li>
+				<strong>Use <code>.fetch()</code></strong> for the call. Errors
+				propagate normally over the HTTP path.
+			</li>
+		</ol>
+		<CodeBlock
+			filename="agents/notes/agent.ts"
+			lang="ts"
+			code={`async runTool(
+  name: string,
+  input: unknown,
+): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
+  try {
+    return { ok: true, result: await execute(name, input) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}`}
+		/>
+
+		<h2>ayjnt run vs ayjnt dev</h2>
+		<p>
+			<code>ayjnt dev</code> is unchanged and stays a thin wrapper around{" "}
+			<code>wrangler dev</code>, with all of wrangler's own behavior. It
+			does not run <code>cli.ts</code> and gives no in-process access,
+			because wrangler owns the runtime and there is nothing to ask for a
+			stub.
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th></th>
+					<th>
+						<code>ayjnt dev</code>
+					</th>
+					<th>
+						<code>ayjnt run</code>
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>Owns the runtime</td>
+					<td>wrangler does</td>
+					<td>ayjnt does (Miniflare + workerd)</td>
+				</tr>
+				<tr>
+					<td>
+						Runs <code>cli.ts</code>
+					</td>
+					<td>No</td>
+					<td>Yes, in the foreground</td>
+				</tr>
+				<tr>
+					<td>In-process agent access</td>
+					<td>None</td>
+					<td>Real Durable Object RPC</td>
+				</tr>
+				<tr>
+					<td>
+						Host tools (<code>tools.host.ts</code>)
+					</td>
+					<td>No</td>
+					<td>Yes</td>
+				</tr>
+				<tr>
+					<td>
+						Browser tools (<code>ayjnt/browser</code>)
+					</td>
+					<td>Yes</td>
+					<td>No</td>
+				</tr>
+				<tr>
+					<td>Same code path as a compiled binary</td>
+					<td>No</td>
+					<td>Yes</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			Reach for <code>dev</code> for ordinary iteration on a worker you're
+			going to deploy. Reach for <code>run</code> when you want{" "}
+			<code>cli.ts</code>, host tools, or a faithful preview of the
+			compiled binary.
+		</p>
+		<Callout kind="note" title="The invariant">
+			<p>
+				A binary from{" "}
+				<a href="/docs/guides/compile" class="link-underline">
+					<code>ayjnt compile</code>
+				</a>{" "}
+				executes the same <code>runApp</code> that{" "}
+				<code>ayjnt run</code> does. Compile only changes where the inputs
+				come from — embedded in the executable instead of read off disk.
+				If the two ever diverged, <code>cli.ts</code> would start
+				behaving differently depending on how it was launched, which is
+				precisely the failure this design exists to avoid.
+			</p>
+		</Callout>
+
+		<h2>ayjnt run flags</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Flag</th>
+					<th>Meaning</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>--cwd &lt;path&gt;</code>
+					</td>
+					<td>Project root.</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--port &lt;n&gt;</code>
+					</td>
+					<td>
+						Port to bind. Default <code>8787</code>; <code>0</code>{" "}
+						picks a free one.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--data-dir &lt;path&gt;</code>
+					</td>
+					<td>Override where Durable Object state is persisted.</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--allow-host-writes</code>
+					</td>
+					<td>
+						Permit host tools declaring{" "}
+						<code>sideEffects: "write"</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>--allow-host-exec</code>
+					</td>
+					<td>
+						Permit host tools declaring{" "}
+						<code>sideEffects: "exec"</code>.
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			There is no wrangler to forward to, so an unrecognized flag before{" "}
+			<code>--</code> is treated as a typo and fails rather than being
+			silently ignored. With no <code>cli.ts</code> in the project,{" "}
+			<code>ayjnt run</code> just serves until interrupted.
+		</p>
+	</DocPageShell>
+</DocsLayout>

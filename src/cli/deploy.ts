@@ -12,9 +12,12 @@
 //
 // Only then: bunx wrangler deploy --config .ayjnt/dist/wrangler.jsonc
 
+import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { runBuild } from "./build.ts";
+import { deployBlockingHostTools } from "./hostTools.ts";
 import { parseArgs, runWrangler } from "./util.ts";
+import { HOST_TOOLS_OPTIONAL_MARKER, type Manifest } from "../core/types.ts";
 
 export async function deploy(argv: string[]): Promise<void> {
   const { cwd, force, passthrough } = parseArgs(argv);
@@ -24,6 +27,11 @@ export async function deploy(argv: string[]): Promise<void> {
   }
 
   const result = await runBuild({ cwd, writeLockfile: false });
+
+  // Host tools have no counterpart in production — see assertNoHostTools.
+  // Checked even under --force: --force is about migration coordination, not
+  // about shipping a worker that will fault at its first tool call.
+  assertNoHostTools(result.manifest, cwd);
 
   if (result.staged && !force) {
     throw new Error(
@@ -41,6 +49,51 @@ export async function deploy(argv: string[]): Promise<void> {
     cwd,
   );
   if (code !== 0) process.exit(code);
+}
+
+/**
+ * Refuse to deploy a project whose agents depend on host tools.
+ *
+ * A `tools.host.ts` executes in the Bun process that hosts the local runtime.
+ * Deployed to Cloudflare there is no such process — no Bun, no bridge — so
+ * those tools cannot work, no matter what. The options were to fail here, to
+ * omit the tools silently, or to deploy stubs that throw at runtime. Failing
+ * here is the only one that surfaces the problem while it's still cheap: a
+ * silent omission gives the same agent different capabilities in prod than
+ * locally with nothing to indicate it, and a throwing stub converts a
+ * build-time error into a production incident.
+ *
+ * A file that genuinely is optional can say so with the
+ * `@ayjnt-optional-on-deploy` marker; its tools are then simply absent from the
+ * deployed ToolSet, which the runtime already handles (no bridge bound means no
+ * proxies are built).
+ */
+export function assertNoHostTools(manifest: Manifest, cwd: string): void {
+  const blocking = deployBlockingHostTools(manifest);
+  if (blocking.length === 0) return;
+
+  const list = blocking
+    .map((t) => `  ${path.relative(cwd, t.sourceFile)}  (${t.routePath})`)
+    .join("\n");
+
+  throw new Error(
+    [
+      `cannot deploy: ${blocking.length} host tool file(s) would not work in production.`,
+      "",
+      list,
+      "",
+      "Host tools run in the Bun process that hosts your local runtime. A deployed",
+      "Cloudflare worker has no host process, so these functions have nowhere to run.",
+      "",
+      "Options:",
+      `  • Move the tools into agents/<route>/tools.ts to run them in workerd instead`,
+      `    (they lose access to Bun.$, Bun.file, bun:sqlite and node APIs).`,
+      `  • Ship the app with \`ayjnt compile\` instead of deploying it.`,
+      `  • If the agent works without them, add the comment marker`,
+      `    \`${HOST_TOOLS_OPTIONAL_MARKER}\` to the file — its tools will be`,
+      `    omitted from the deployed ToolSet instead of blocking the deploy.`,
+    ].join("\n"),
+  );
 }
 
 /**
