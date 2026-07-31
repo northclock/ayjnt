@@ -1,6 +1,6 @@
 ---
 name: ayjnt-troubleshoot
-description: Diagnose and fix common ayjnt failures. Use when the user reports a specific symptom — "useAgent doesn't work", "compatibility date error", "lockfile divergence", "404 on /<route>", "wrangler refuses to deploy", "basePath gotcha", "agent state is undefined", "renamed an agent and lost storage", or "inter-agent RPC returns [object Object]". Maps each symptom to its root cause and the one-line fix. Most failures map to gotchas with known resolutions; don't speculate when the symptom matches one of these.
+description: Diagnose and fix common ayjnt failures. Use when the user reports a specific symptom — "useAgent doesn't work", "compatibility date error", "lockfile divergence", "404 on /<route>", "wrangler refuses to deploy", "basePath gotcha", "agent state is undefined", "renamed an agent and lost storage", "inter-agent RPC returns [object Object]", "Cannot find package 'workerd'", "host tool file(s) would not work in production", "does not exist in workerd", "declares sideEffects", browser tools failing in a compiled binary, or an agent method throwing without a message when called from cli.ts. Maps each symptom to its root cause and the one-line fix. Most failures map to gotchas with known resolutions; don't speculate when the symptom matches one of these.
 ---
 
 # Troubleshoot ayjnt failures
@@ -195,6 +195,120 @@ without a pinned `agentId` — the migration differ recognises it as a
 move and preserves storage. A simultaneous folder + class rename is
 the case that needs the pinned id.
 
+## "Cannot find package 'workerd'" from a compiled binary
+
+**Cause.** The `workerd` npm module wasn't aliased at bundle time.
+`miniflare` does a top-level `require("workerd")`, and that package
+resolves its native binary through `require.resolve` **at module-load
+time** — there's no `node_modules` inside a binary, so it throws before
+miniflare's own override is consulted. This happens when compiling
+outside `ayjnt compile` (a hand-rolled `bun build --compile`).
+
+**Fix.** Compile with `ayjnt compile`. It aliases the module to a
+generated stub that reports the extracted path.
+
+Note: **`MINIFLARE_WORKERD_PATH` alone does not fix this** — the import
+fails before the env var is ever read.
+
+## "Browser tools fail under `ayjnt run` or in a compiled binary"
+
+**Cause.** `ayjnt/browser` needs a `worker_loaders` binding, and
+Miniflare has no equivalent. `ayjnt run` and `ayjnt compile` both warn
+about this; everything else in the app works.
+
+**Fix.** Use `ayjnt dev` or a deployed worker for browser tools. If the
+app needs both, gate the browser path so the local runtime skips it.
+
+## "cannot deploy: N host tool file(s) would not work in production"
+
+**Cause.** The project has one or more `agents/<route>/tools.host.ts`.
+Those functions run in the Bun process hosting the local runtime; a
+deployed Cloudflare worker has no host process, so they'd have nowhere
+to run. The deploy fails rather than silently shipping an agent with
+different capabilities than it had locally.
+
+**Fix.** Pick one:
+
+1. Move the tools into `agents/<route>/tools.ts` to run them in workerd
+   (losing `Bun.$`, `Bun.file`, `bun:sqlite` and node APIs).
+2. Ship with `ayjnt compile` instead of deploying.
+3. Add the comment marker `@ayjnt-optional-on-deploy` to the file — its
+   tools are omitted from the deployed ToolSet instead of blocking the
+   deploy. Safe because `agentTools()` only builds host proxies when the
+   bridge is bound, so a deployed agent degrades rather than erroring.
+
+See [`ayjnt-tools`](../ayjnt-tools/SKILL.md).
+
+## "An agent method throws, but `cli.ts` gets no message"
+
+**Cause.** A Miniflare limitation, not a framework bug: exceptions from
+**host-initiated** Durable Object calls lose their body. workerd returns
+a 4xx for an application error and the proxy asserts on the status
+before reading the body, so the real message is discarded upstream. The
+framework detects the assertion and substitutes an explanatory error,
+but it cannot recover the original text. Worker-to-DO calls are
+unaffected — this is specific to calling in from the host, which is what
+`cli.ts` does.
+
+**Fix.** Return results instead of throwing:
+
+```ts
+async runTool(name: string, input: unknown):
+  Promise<{ ok: true; result: unknown } | { ok: false; error: string }>
+{
+  try {
+    return { ok: true, result: await run(name, input) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+```
+
+Or call the method over HTTP with `agents.<route>(...).fetch()`, where
+errors propagate normally. Logging inside the agent method also works.
+
+## Build fails: "uses `Bun.file`, which does not exist in workerd"
+
+**Cause.** An `agents/<route>/tools.ts` reaches for a Bun-only global.
+That file runs **inside workerd**, next to the agent. The scanner
+catches it at build time rather than letting it throw
+`Bun is not defined` on the first tool call.
+
+**Fix.** Rename the file to `tools.host.ts` so the functions run on the
+Bun host instead. Host tools can't be deployed to Cloudflare — see the
+deploy entry above. Comments merely *mentioning* `Bun.file` are fine;
+the check runs on stripped source.
+
+## Host tool refused: "declares sideEffects: \"write\""
+
+**Cause.** Host tools above `read` need explicit permission, because
+their arguments come from model output.
+
+**Fix.** Pass the matching flag, or set the env var for
+non-interactive runs (CI, a compiled binary you can't re-flag):
+
+```sh
+ayjnt run --allow-host-writes -- import notes.txt
+./notes --allow-host-exec build
+AYJNT_ALLOW_HOST_EFFECTS=write,exec ./notes tool appendToLog '{"line":"hi"}'
+```
+
+On an interactive TTY you'll instead get a y/N confirm, remembered per
+tool for the session. With no TTY and no permission, the call is refused.
+
+## A binary built with `--no-embed-workerd` won't start
+
+**Cause.** That flag trades ~100MB of binary size for self-containment —
+the workerd binary isn't inside it, so the host has to supply one.
+
+**Fix.** Point it at a workerd binary:
+
+```sh
+AYJNT_WORKERD_PATH=/path/to/workerd ./notes list
+```
+
+Or rebuild without the flag (`ayjnt compile`) to embed it.
+
 ## "Upgraded ayjnt and an instance with a non-ASCII / space / encoded name lost its state"
 
 **Cause.** Since the routing rework, the worker percent-DECODES URL
@@ -218,6 +332,16 @@ ls -la .ayjnt/assets/__ayjnt/*    # bundled UI assets
 
 # Force a clean regen
 rm -rf .ayjnt/dist .ayjnt/assets .ayjnt/client && bun run build
+```
+
+For the local runtime (`ayjnt run` / a compiled binary), state lives
+outside the project — `~/Library/Application Support/ayjnt/<worker>` on
+macOS, `$XDG_STATE_HOME`/`~/.local/state/ayjnt/<worker>` on Linux,
+`%LOCALAPPDATA%\ayjnt\<worker>` on Windows. Point it somewhere
+disposable to start clean:
+
+```sh
+ayjnt run --data-dir /tmp/scratch-state
 ```
 
 Don't hand-edit anything under `.ayjnt/` — every file there

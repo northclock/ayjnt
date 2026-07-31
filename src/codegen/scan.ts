@@ -11,15 +11,17 @@
 import { Glob } from "bun";
 import * as path from "node:path";
 import { existsSync } from "node:fs";
-import type {
-  AgentEntry,
-  CallableMethod,
-  FeatureFlags,
-  Manifest,
-  WorkflowEntry,
+import {
+  HOST_TOOLS_OPTIONAL_MARKER,
+  type AgentEntry,
+  type CallableMethod,
+  type FeatureFlags,
+  type Manifest,
+  type ToolsEntry,
+  type WorkflowEntry,
 } from "../core/types.ts";
 
-export type { AgentEntry, CallableMethod, WorkflowEntry };
+export type { AgentEntry, CallableMethod, ToolsEntry, WorkflowEntry };
 
 /** Binding names the framework provisions itself (feature bindings and the
  *  assets Fetcher). An agent or workflow class whose derived binding lands
@@ -49,6 +51,7 @@ export async function scan(root: string): Promise<Manifest> {
       workflows: await scanWorkflows(root),
       features: emptyFeatures(),
       rootApp: null,
+      cliFile: resolveCliFile(root),
     };
   }
 
@@ -113,6 +116,7 @@ export async function scan(root: string): Promise<Manifest> {
       hasOnEmail,
       isVoice,
       middlewareChain: await resolveMiddlewareChain(agentFolder, root),
+      tools: await resolveTools(agentFolder, routePath),
     });
 
     // Feature opt-ins — detected by source-level import or method. One
@@ -143,7 +147,109 @@ export async function scan(root: string): Promise<Manifest> {
         middlewareChain: await resolveMiddlewareChain(agentsDir, root),
       }
     : null;
-  return { root, agents: entries, workflows, features, rootApp };
+  return {
+    root,
+    agents: entries,
+    workflows,
+    features,
+    rootApp,
+    cliFile: resolveCliFile(root),
+  };
+}
+
+/** Absolute path to a root-level `cli.ts`, or null. Sibling convention to the
+ *  root `email.ts` / `middleware.ts` hooks. */
+export function resolveCliFile(root: string): string | null {
+  const file = path.join(root, "cli.ts");
+  return existsSync(file) ? file : null;
+}
+
+/**
+ * Find the tool collections co-located with one agent.
+ *
+ * `tools.ts` runs in workerd; `tools.host.ts` runs in the Bun host. A route
+ * may have both — they merge into a single ToolSet at the call site — so this
+ * returns 0, 1, or 2 entries, worker-first for stable codegen ordering.
+ *
+ * The workerd-side file is checked for Bun/node-only globals here rather than
+ * left to fail inside workerd, where the symptom is a bare
+ * `Bun is not defined` at the first tool call with nothing pointing at the
+ * cause.
+ */
+export async function resolveTools(
+  agentFolder: string,
+  routePath: string,
+): Promise<ToolsEntry[]> {
+  const found: ToolsEntry[] = [];
+
+  const workerFile = path.join(agentFolder, "tools.ts");
+  if (existsSync(workerFile)) {
+    const source = await Bun.file(workerFile).text();
+    const offender = detectHostOnlyGlobals(source);
+    if (offender) {
+      throw new Error(
+        `${workerFile}: uses \`${offender}\`, which does not exist in workerd. ` +
+          `tools.ts runs inside the Workers runtime alongside your agent. ` +
+          `Rename the file to tools.host.ts to run these functions on the Bun ` +
+          `host instead (note: host tools cannot be deployed to Cloudflare).`,
+      );
+    }
+    found.push({
+      sourceFile: workerFile,
+      runtime: "worker",
+      routePath,
+      optionalOnDeploy: false,
+    });
+  }
+
+  const hostFile = path.join(agentFolder, "tools.host.ts");
+  if (existsSync(hostFile)) {
+    const source = await Bun.file(hostFile).text();
+    found.push({
+      sourceFile: hostFile,
+      runtime: "host",
+      routePath,
+      // Read from the RAW source: the marker lives in a comment, which
+      // stripComments would blank out.
+      optionalOnDeploy: source.includes(HOST_TOOLS_OPTIONAL_MARKER),
+    });
+  }
+
+  return found;
+}
+
+/**
+ * Detect a Bun/node-only global or import in source destined for workerd.
+ * Returns the offending token, or null when the source is workerd-safe.
+ *
+ * Comment-stripped so a doc comment mentioning `Bun.$` doesn't trip it.
+ * `node:` specifiers are allowed — `nodejs_compat` is always on in generated
+ * configs, so workerd provides a real subset of them; the Bun globals and
+ * `bun:` specifiers are the genuinely unavailable ones.
+ *
+ * Exported for tests.
+ */
+export function detectHostOnlyGlobals(source: string): string | null {
+  const code = stripComments(source);
+  // `Bun.` as a member access, and `bun:*` builtin specifiers. Word-boundary
+  // guarded so `myBun.foo` / `"rebun:x"` don't match.
+  // Capture the member name too, so the error can say `Bun.file` rather than
+  // the much less helpful `Bun.`.
+  const member = /(?<![\w$.])Bun\s*\.\s*([A-Za-z_$][\w$]*)/.exec(code);
+  if (member) return `Bun.${member[1]}`;
+  const bareBun = /(?<![\w$.])Bun\s*\./.exec(code);
+  if (bareBun) return "Bun";
+  const builtin = /["']bun:[a-z]+["']/.exec(code);
+  if (builtin) return builtin[0].replace(/["']/g, "");
+  return null;
+}
+
+/** Every host-runtime tool file in the manifest. Drives the deploy refusal
+ *  and the host bridge's boot-time schema extraction. */
+export function hostToolFiles(manifest: Manifest): ToolsEntry[] {
+  return manifest.agents.flatMap((a) =>
+    a.tools.filter((t) => t.runtime === "host"),
+  );
 }
 
 /**

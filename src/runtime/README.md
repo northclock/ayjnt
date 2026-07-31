@@ -11,6 +11,16 @@ What the user imports when they write `import { ... } from "ayjnt"` or any of it
 | `getAgent` | `"ayjnt/rpc"` | The same typed inter-agent stub, available separately for when you only need RPC. |
 | `useAgent` | `"@ayjnt/<route>"` | Per-agent typed React hook, generated into `.ayjnt/client/<route>/index.tsx`. Bound to the agent's class and route prefix. |
 | `GeneratedEnv` | `"@ayjnt/env"` | Every DO binding typed against the correct agent class. Extend with your own KV/R2 bindings. |
+| `agentTools`, `hostTool`, `confinePath` | `"ayjnt/tools"` | Model tools. `agentTools(this)` merges an agent's `tools.ts` (workerd) and `tools.host.ts` (Bun host) into one AI-SDK `ToolSet`. |
+| `AyjntCliBase`, `AgentHandle`, `defineCli` | `"ayjnt/cli"` | Types for a root-level `cli.ts`. Source lives in `cliContext.ts` — see the note below. |
+| `AyjntCli` | `"@ayjnt/cli"` | The **generated**, project-specific context: `agents` and `workflows` typed against your actual classes. This is what user code imports. |
+
+Note the file/specifier mismatch: `"ayjnt/cli"` resolves to
+[`cliContext.ts`](./cliContext.ts), not `cli.ts`. An output basename of `cli`
+collides with the `src/cli/` directory that another bunup block draws entries
+from, and bunup resolves the ambiguity by preserving the full source structure —
+emitting `dist/src/runtime/*.js` and silently invalidating every `./dist/*.js`
+path in the exports map. The public specifier is unaffected.
 
 The generated worker entry imports `compose` and `createContext` from `"ayjnt/middleware"` too — those are framework-internal but live in the same module so generated code has a single import source.
 

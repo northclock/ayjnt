@@ -1,0 +1,467 @@
+---
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import DocPageShell from "@/components/DocPageShell.astro";
+import Callout from "@/components/Callout.astro";
+import CodeBlock from "@/components/CodeBlock.astro";
+---
+<DocsLayout
+	title="Agent tools — ayjnt docs"
+	description="Per-route tool collections a model can call: tools.ts runs in workerd, tools.host.ts runs in the Bun host process, and both merge into one ToolSet."
+>
+	<DocPageShell
+		slug="guides/agent-tools"
+		lede="Drop a tools.ts next to an agent and the model gets tools that run in workerd. Drop a tools.host.ts and it gets tools that run on the local machine. The filename picks the runtime."
+	>
+		<h2>Two files, two runtimes</h2>
+		<p>
+			A tool collection is co-located with the agent that owns it, the same
+			way <code>app.tsx</code> and <code>docs.md</code> are. There are two
+			filenames, and which one you use decides where the function body
+			executes.
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>File</th>
+					<th>Runs in</th>
+					<th>Can use</th>
+					<th>Deploys?</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>agents/&lt;route&gt;/tools.ts</code>
+					</td>
+					<td>workerd, next to the agent</td>
+					<td>
+						The agent's own state, <code>fetch</code>, plain
+						computation
+					</td>
+					<td>Yes — like any other worker code</td>
+				</tr>
+				<tr>
+					<td>
+						<code>agents/&lt;route&gt;/tools.host.ts</code>
+					</td>
+					<td>The Bun host process</td>
+					<td>
+						<code>Bun.$</code>, <code>Bun.file</code>,{" "}
+						<code>bun:sqlite</code>, node APIs
+					</td>
+					<td>
+						No — <code>ayjnt deploy</code> refuses
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			The rule of thumb: if a tool only needs the agent's state, the
+			network, or arithmetic, it belongs in <code>tools.ts</code>. Reach for{" "}
+			<code>tools.host.ts</code> only when a tool genuinely needs the local
+			machine.
+		</p>
+
+		<h3>Workerd-side tools</h3>
+		<p>
+			Export AI-SDK tools built with <code>tool()</code> from{" "}
+			<code>"ai"</code>. Nothing about them is ayjnt-specific — a{" "}
+			<code>tools.ts</code> is a plain module of AI-SDK tool definitions.
+		</p>
+		<CodeBlock
+			filename="agents/notes/tools.ts"
+			lang="ts"
+			code={`import { tool } from "ai";
+import { z } from "zod";
+
+export const countWords = tool({
+  description: "Count the words in a piece of text.",
+  inputSchema: z.object({ text: z.string() }),
+  execute: async ({ text }) => ({
+    words: text.trim().split(" ").filter(Boolean).length,
+    characters: text.length,
+  }),
+});`}
+		/>
+
+		<h3>Host-side tools</h3>
+		<p>
+			Export <code>hostTool()</code> definitions from{" "}
+			<code>"ayjnt/tools"</code>. Same shape, plus one required field —{" "}
+			<code>sideEffects</code>, covered below.
+		</p>
+		<CodeBlock
+			filename="agents/notes/tools.host.ts"
+			lang="ts"
+			code={`import { confinePath, hostTool } from "ayjnt/tools";
+import { z } from "zod";
+
+const ROOT = process.cwd();
+
+export const readProjectFile = hostTool({
+  description: "Read a UTF-8 text file from the project directory.",
+  sideEffects: "read",
+  inputSchema: z.object({ path: z.string() }),
+  execute: async ({ path }: { path: string }) => {
+    const file = Bun.file(confinePath(ROOT, path));
+    if (!(await file.exists())) throw new Error(\`no such file: \${path}\`);
+    return { path, text: await file.text() };
+  },
+});`}
+			highlightLines={[8, 11]}
+		/>
+		<p>
+			The <code>execute</code> body never reaches workerd. The host imports
+			this module directly; the worker only ever receives{" "}
+			<code>description</code> and <code>inputSchema</code> so it can
+			advertise the tool to the model and proxy calls back.
+		</p>
+
+		<h2>Why there is no “use host” directive</h2>
+		<p>
+			You might expect a <code>"use host"</code> pragma at the top of the
+			file, by analogy with React's <code>"use client"</code> and{" "}
+			<code>"use server"</code>. There deliberately isn't one:{" "}
+			<strong>the filename is the declaration.</strong>
+		</p>
+		<p>
+			React needs a directive because it has no filename convention — any
+			module can be imported from either environment, so the boundary has to
+			be written inside the file. ayjnt already has a filename convention
+			for everything else in the tree (<code>agent.ts</code>,{" "}
+			<code>middleware.ts</code>, <code>app.tsx</code>), so a directive would
+			be redundant ceremony that can <em>disagree</em> with the path. One
+			source of truth, and it's visible in a directory listing.
+		</p>
+
+		<h2>Using them from the agent</h2>
+		<p>
+			Both kinds converge on the AI-SDK <code>ToolSet</code> shape, so they
+			merge into one object at the call site and spread alongside{" "}
+			<a href="/docs/guides/browser" class="link-underline">
+				browser tools
+			</a>
+			:
+		</p>
+		<CodeBlock
+			filename="agents/notes/agent.ts"
+			lang="ts"
+			code={`import { agentTools } from "ayjnt/tools";
+import { browserTools } from "ayjnt/browser";
+import { generateText } from "ai";
+
+const tools = { ...browserTools(this), ...agentTools(this) };
+const result = await generateText({ model, tools, messages });`}
+			highlightLines={[5]}
+		/>
+		<p>
+			<code>agentTools(this)</code> returns the agent's own workerd-side
+			tools plus proxies for any host tools the local runtime advertised.
+			Nothing in the agent knows about the split — from its point of view
+			they're all just tools. It returns <code>{"{}"}</code> when an agent
+			has no tools at all, so it is always safe to spread.
+		</p>
+
+		<h2>Tool names the model sees</h2>
+		<p>
+			Workerd-side tools keep their export names. Host tools are{" "}
+			<strong>namespaced by route</strong>, so two agents can each have a{" "}
+			<code>search</code> tool without colliding:
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Export</th>
+					<th>Name the model sees</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>readProjectFile</code> in{" "}
+						<code>agents/notes/tools.host.ts</code>
+					</td>
+					<td>
+						<code>notes__readProjectFile</code>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>list</code> in{" "}
+						<code>agents/admin/users/tools.host.ts</code>
+					</td>
+					<td>
+						<code>admin_users__list</code>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			Nested routes flatten with a single underscore and the route is
+			separated from the export name by a double underscore. Both are
+			forced by provider-side tool-name rules — most model APIs accept only{" "}
+			<code>[a-zA-Z0-9_-]</code>, so slashes can't survive. If a
+			workerd-side tool and a host tool ever produce the same key, the
+			workerd one wins: it lives in the same file tree as the agent and
+			deploys with it, which makes it the less surprising winner.
+		</p>
+
+		<h2>The build-time guard</h2>
+		<p>
+			A <code>tools.ts</code> that reaches for a Bun-only API fails the
+			build, with a pointer at the file you probably meant to write:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`$ ayjnt build
+agents/notes/tools.ts: uses \`Bun.file\`, which does not exist in workerd.
+tools.ts runs inside the Workers runtime alongside your agent. Rename the file
+to tools.host.ts to run these functions on the Bun host instead (note: host
+tools cannot be deployed to Cloudflare).`}
+		/>
+		<p>
+			The alternative was letting it compile and then throwing{" "}
+			<code>Bun is not defined</code> inside workerd on the first tool call,
+			with nothing pointing at the cause. The check looks for{" "}
+			<code>Bun.*</code> member access and <code>bun:</code> module
+			specifiers. Comments are stripped before checking, so a doc comment
+			mentioning <code>Bun.$</code> is fine —{" "}
+			<code>node:</code> imports are fine too, since{" "}
+			<code>nodejs_compat</code> is always on in generated configs.
+		</p>
+
+		<h2>sideEffects and permission</h2>
+		<p>
+			Every host tool must declare what it does. There is no default,
+			because a default would silently pick a trust level on the author's
+			behalf.
+		</p>
+		<table>
+			<thead>
+				<tr>
+					<th><code>sideEffects</code></th>
+					<th>Behaviour</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						<code>"read"</code>
+					</td>
+					<td>Runs freely.</td>
+				</tr>
+				<tr>
+					<td>
+						<code>"write"</code>
+					</td>
+					<td>
+						Needs <code>--allow-host-writes</code>.
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<code>"exec"</code>
+					</td>
+					<td>
+						Needs <code>--allow-host-exec</code>.
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<p>
+			Permission can also come from{" "}
+			<code>AYJNT_ALLOW_HOST_EFFECTS=write,exec</code> — a comma list, so a
+			compiled binary can run non-interactively in CI without being rebuilt
+			with different flags. Failing both of those, and only when stdin is a
+			TTY, the host asks:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`[ayjnt] An agent wants to run host tool "appendToLog" (/notes),
+        declared sideEffects: "write".
+        Arguments came from model output. Allow for this session? [y/N]`}
+		/>
+		<p>
+			An answer is remembered for the rest of the session, per tool. An
+			agent loop can call the same tool dozens of times, and re-prompting
+			each time would train you to approve without reading. With no TTY and
+			no grant, the call is refused with a message naming the flag that
+			would allow it.
+		</p>
+
+		<h2>Security: model output reaches your machine</h2>
+		<Callout kind="danger" title="A host tool is a path from untrusted text to local code execution">
+			<p>
+				The arguments to a host tool come from{" "}
+				<strong>model output</strong>, and that output may have been
+				shaped by content the agent ingested — an inbound email, a
+				retrieved document, a fetched page. Anyone who can get text in
+				front of your agent has an indirect influence on the arguments
+				your host tools receive.
+			</p>
+			<p>
+				This is not hypothetical prompt-injection theory: it is the
+				normal operating condition of an agent that reads things.
+				Treat every host tool input as attacker-controlled.
+			</p>
+		</Callout>
+		<p>Three mitigations, in order of how often they matter:</p>
+		<h3>1. Never build shell commands by string</h3>
+		<p>
+			<code>Bun.$</code> escapes its interpolations by default, so{" "}
+			<code>await Bun.$`git -C {"${dir}"} log`</code> is safe even when{" "}
+			<code>dir</code> is hostile — it becomes one argument, not a command
+			separator. What breaks that is{" "}
+			<code>Bun.$(rawString)</code>, which takes a pre-built command line
+			and hands it to the shell unescaped. Don't use it in a host tool.
+		</p>
+		<h3>2. Confine every model-supplied path</h3>
+		<p>
+			“The model passed a path” is the most common way a host tool turns
+			into a file-disclosure primitive. Use <code>confinePath</code> from{" "}
+			<code>"ayjnt/tools"</code>:
+		</p>
+		<CodeBlock
+			lang="ts"
+			code={`import { confinePath } from "ayjnt/tools";
+
+// Throws if the resolved path escapes ROOT.
+execute: async ({ file }: { file: string }) =>
+  await Bun.file(confinePath(ROOT, file)).text(),`}
+		/>
+		<p>
+			A <code>startsWith</code> check on the raw string is <em>not</em>{" "}
+			enough, and it fails in two different directions:{" "}
+			<code>../../.ssh/id_rsa</code> passes it because <code>..</code>{" "}
+			segments have to be resolved before comparing, and a sibling
+			directory like <code>/srv/data-evil</code> passes it because it
+			shares a prefix with <code>/srv/data</code>.{" "}
+			<code>confinePath</code> resolves first, then compares the relative
+			path, which handles both. It's pure path arithmetic, so it works from
+			either runtime.
+		</p>
+		<h3>3. Declare the narrowest sideEffects that works</h3>
+		<p>
+			A tool that only reads should say <code>"read"</code>; a tool that
+			shells out should say <code>"exec"</code> even if today's command is
+			harmless. The declaration is what the permission gate has to work
+			with, and over-declaring trains users to grant more than they need.
+		</p>
+
+		<h2>Deploying a project with host tools</h2>
+		<p>
+			<code>ayjnt deploy</code> refuses outright:
+		</p>
+		<CodeBlock
+			lang="sh"
+			code={`$ ayjnt deploy
+cannot deploy: 1 host tool file(s) would not work in production.
+
+  agents/notes/tools.host.ts  (/notes)
+
+Host tools run in the Bun process that hosts your local runtime. A deployed
+Cloudflare worker has no host process, so these functions have nowhere to run.`}
+		/>
+		<p>
+			The three alternatives were to omit the tools silently, to deploy
+			stubs that throw on first call, or to fail here. Failing is the only
+			one that surfaces the problem while it's still cheap — a silent
+			omission gives the same agent different capabilities in production
+			than locally with nothing to indicate it, and a throwing stub
+			converts a build-time error into a production incident. Your options:
+		</p>
+		<ul>
+			<li>
+				Move the tools into <code>tools.ts</code> to run them in workerd
+				(they lose <code>Bun.$</code>, <code>Bun.file</code>,{" "}
+				<code>bun:sqlite</code> and node APIs).
+			</li>
+			<li>
+				Ship the app with{" "}
+				<a href="/docs/guides/compile" class="link-underline">
+					<code>ayjnt compile</code>
+				</a>{" "}
+				instead of deploying it.
+			</li>
+			<li>
+				If the agent works without them, add the comment marker{" "}
+				<code>@ayjnt-optional-on-deploy</code> anywhere in the file. Its
+				tools are then omitted from the deployed ToolSet instead of
+				blocking the deploy.
+			</li>
+		</ul>
+		<Callout kind="note" title="Degrades, doesn't error">
+			<p>
+				Deployed, no bridge is bound, so <code>agentTools()</code>{" "}
+				returns only the workerd-side tools. An agent that was written
+				to tolerate their absence keeps working with a smaller ToolSet —
+				which is exactly what makes{" "}
+				<code>@ayjnt-optional-on-deploy</code> safe rather than a way to
+				defer a crash.
+			</p>
+		</Callout>
+
+		<h2>How the bridge works</h2>
+		<p>
+			Worth knowing if you're debugging, and shorter than you'd expect.
+		</p>
+		<ol>
+			<li>
+				At boot, the host imports every <code>tools.host.ts</code>,
+				reads each <code>hostTool()</code> export, and converts its
+				schema to JSON Schema (zod 4's <code>z.toJSONSchema</code>; a
+				plain JSON Schema passes through untouched). Schemas are always
+				in sync with the implementation because they're derived from it,
+				not restated.
+			</li>
+			<li>
+				The descriptors —{" "}
+				<code>{"{ route, name, toolName, description, sideEffects, inputSchema }"}</code>{" "}
+				— cross into workerd as a plain JSON binding. The worker builds a{" "}
+				<code>dynamicTool()</code> proxy for each, which is the AI-SDK
+				primitive for a tool whose schema is only known at runtime.
+			</li>
+			<li>
+				Calls travel back over Miniflare's{" "}
+				<code>serviceBindings</code>: the framework registers a plain
+				host function, Miniflare runs it in the Bun process and exposes
+				it to workerd as an ordinary <code>Fetcher</code>. So{" "}
+				<code>env.__AYJNT_HOST.fetch(...)</code> inside workerd lands on
+				Bun code.
+			</li>
+		</ol>
+		<p>
+			There is no capnweb or Cap'n Proto dependency here — workerd already
+			speaks Cap'n Proto to that loopback internally, so the capability
+			channel exists and all the framework adds is a payload format on top
+			of it. The payload is JSON because these are LLM tool calls:
+			arguments arrive as JSON from the model and results go back into the
+			model's context as JSON. Streaming, callback arguments, or promise
+			pipelining would justify reaching for something richer; tool calls do
+			not.
+		</p>
+		<p>
+			Tool failures come back as a structured{" "}
+			<code>{"{ ok: false, error }"}</code> rather than a bridge fault — a
+			model passing a bad path or a command exiting non-zero is expected
+			traffic, and the model can usually recover if you hand it the
+			message.
+		</p>
+
+		<h2>Where to go next</h2>
+		<ul>
+			<li>
+				<a href="/docs/guides/cli-file" class="link-underline">
+					The cli.ts file
+				</a>{" "}
+				— drive agents and their tools from a Bun foreground process.
+			</li>
+			<li>
+				<a href="/docs/guides/compile" class="link-underline">
+					Compiling to an executable
+				</a>{" "}
+				— the shipping story for an app with host tools.
+			</li>
+		</ul>
+	</DocPageShell>
+</DocsLayout>

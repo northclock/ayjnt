@@ -139,9 +139,16 @@ function startWatchers(cwd: string): FSWatcher[] {
   // Root-level codegen inputs: a middleware.ts here joins every agent's
   // chain, and an email.ts overrides the generated email resolver — both
   // only take effect through a rebuild.
+  // A cli.ts here is never bundled into the worker, but its presence changes
+  // what codegen emits (`@ayjnt/cli` accessors), so it belongs in the watch set.
   watchers.push(
     watch(cwd, (eventType, filename) => {
-      if (filename !== "middleware.ts" && filename !== "email.ts") return;
+      if (
+        filename !== "middleware.ts" &&
+        filename !== "email.ts" &&
+        filename !== "cli.ts"
+      )
+        return;
       schedule(`${eventType}: ${filename}`);
     }),
   );

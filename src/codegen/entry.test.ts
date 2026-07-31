@@ -37,6 +37,7 @@ function agent(overrides: Partial<AgentEntry>): AgentEntry {
     hasOnEmail: false,
     isVoice: false,
     middlewareChain: [],
+    tools: [],
     ...overrides,
   };
 }

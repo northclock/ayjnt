@@ -43,6 +43,10 @@ import {
   hasDefaultExport,
   type BundledApp,
 } from "../codegen/client.ts";
+import {
+  assertNoReservedClientRoutes,
+  generateCliTypes,
+} from "../codegen/cli.ts";
 import { generateEntry } from "../codegen/entry.ts";
 import {
   applyDiff,
@@ -92,6 +96,10 @@ export type BuildResult = {
   appCount: number;
   /** Count of agents with a co-located docs.md that got embedded. */
   docsCount: number;
+  /** The manifest this build was generated from. `ayjnt run` and
+   *  `ayjnt compile` need it to configure the local runtime (DO bindings,
+   *  workflows, host tools) without re-scanning. */
+  manifest: Manifest;
 };
 
 export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
@@ -129,6 +137,16 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
 
   const envPath = path.join(dotDir, "env.d.ts");
   await Bun.write(envPath, generateEnvTypes(manifest, envPath));
+
+  // `@ayjnt/cli` — the typed context for a root-level cli.ts. Emitted
+  // unconditionally: the types are useful for authoring cli.ts before the file
+  // exists, and an unused generated module costs nothing (it's types-only).
+  assertNoReservedClientRoutes(manifest);
+  const cliTypesPath = path.join(clientDir, "cli.ts");
+  await Bun.write(
+    cliTypesPath,
+    generateCliTypes(manifest, { outPath: cliTypesPath }),
+  );
 
   // Per-agent typed useAgent hooks. Must exist on disk BEFORE bundling so
   // the @ayjnt/<route> imports in user app.tsx resolve.
@@ -294,6 +312,7 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
     agentCount: manifest.agents.length,
     appCount,
     docsCount,
+    manifest,
   };
 }
 
