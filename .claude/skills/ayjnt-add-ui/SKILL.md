@@ -120,5 +120,5 @@ results in your client (Claude Desktop, Codex, etc.).
 
 ## Reference
 
-[`examples/with-ui`](../../../examples/with-ui) — live counter with
-multi-tab state sync. The whole UI is ~40 lines.
+[`examples/code`](../../../examples/code) — a root session dashboard and a
+per-agent conversation UI sharing durable state.

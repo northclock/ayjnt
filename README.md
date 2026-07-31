@@ -1,8 +1,11 @@
 # ayjnt
 
-**Agent-first framework for Cloudflare.** No worker boilerplate, no wrangler wrestling.
+**An agent harness framework for people and their agents.**
 
-You write agents. ayjnt generates the worker entrypoint, the wrangler config, and the durable-object migrations — all from your folder structure.
+Ayjnt gives agents a safe runtime, native host capabilities, durable state, and
+first-class interfaces for the browser and terminal. You write the harness;
+Ayjnt generates the runtime entrypoint, configuration, migrations, and typed
+clients from the folder structure.
 
 ```
 agents/
@@ -38,12 +41,11 @@ A minimal agent looks like this:
 
 ```ts
 // agents/chat/agent.ts
-import { Agent } from "agents";
-import type { GeneratedEnv } from "@ayjnt/env";
+import { Agent } from "ayjnt";
 
 type State = { messages: string[] };
 
-export default class ChatAgent extends Agent<GeneratedEnv, State> {
+export default class ChatAgent extends Agent<State> {
   override initialState: State = { messages: [] };
 
   override async onRequest(request: Request): Promise<Response> {
@@ -53,6 +55,11 @@ export default class ChatAgent extends Agent<GeneratedEnv, State> {
 ```
 
 Save it, and `ayjnt dev` picks it up — no config, no registration, no migration files to hand-write.
+
+Ayjnt's `Agent` is a thin subclass of Cloudflare's Agents SDK class. If you
+prefer the upstream class, `import { Agent } from "agents"` is equally
+supported in `agent.ts`; discovery, routing, generated bindings, UIs, and tools
+work the same way.
 
 ## File conventions — the whole API
 
@@ -85,25 +92,29 @@ Save it, and `ayjnt dev` picks it up — no config, no registration, no migratio
 
 ## What you can build
 
-Each feature is one file or one import away. The linked example is a complete, runnable project.
+The examples are deliberately few and complete. Each is a recognizable harness,
+with agent behavior and the interface a person actually uses:
 
-- **React UI per agent + a home page** — drop `app.tsx` next to `agent.ts` for a per-agent page, or `agents/app.tsx` for a home page at `/`; the generated `useAgent()` hook gives you typed live state with multi-tab sync. → [`examples/with-ui`](./examples/with-ui)
-- **Middleware** — auth gates, logging, response wrapping; layered by folder. → [`examples/middleware`](./examples/middleware)
-- **Inter-agent RPC** — call another agent's methods with full type safety via `getAgent<T>()` from `ayjnt/rpc`. Native Workers RPC, no HTTP. → [`examples/inter-agent`](./examples/inter-agent)
-- **Browser-callable methods** — mark a method with Cloudflare's `@callable()` decorator and call it from the UI as `agent.stub.method()`, typed end-to-end. → [`examples/callable-client`](./examples/callable-client)
-- **MCP servers** — extend `McpAgent` and ayjnt routes it through the SDK's MCP transport automatically; connect Claude Desktop or any MCP client. → [`examples/mcp`](./examples/mcp)
-- **Scheduling** — `this.schedule()` for one-shot deferred work, `this.scheduleEvery()` for recurring tasks; both survive restarts. → [`examples/scheduled-tasks`](./examples/scheduled-tasks), [`examples/recurring-tasks`](./examples/recurring-tasks)
-- **Durable workflows** — pair an agent with a Cloudflare Workflow (`agents/<route>/workflow.ts`) for long-running jobs with retries. → [`examples/workflows`](./examples/workflows)
-- **Voice** — wrap your agent in `withVoice()` for streaming speech-to-text and text-to-speech over WebSocket. → [`examples/voice-agent`](./examples/voice-agent)
-- **Email** — define `async onEmail(message)` and ayjnt wires Cloudflare Email Routing so the agent can receive and reply. → [`examples/email-bot`](./examples/email-bot)
-- **Web browsing** — import `browserTools` from `ayjnt/browser` to give an LLM a real browser via Cloudflare Browser Rendering. → [`examples/browser-tools`](./examples/browser-tools)
-- **Agent catalog** — `GET /__ayjnt/catalog` returns a JSON tree of every agent the caller can reach, with its `@callable` methods and docs — filtered by middleware, so gated agents stay hidden. → [`examples/catalog`](./examples/catalog)
-- **Model tools, in either runtime** — `tools.ts` next to an agent runs in workerd; `tools.host.ts` runs on the Bun host so a tool can shell out or read a local file. Both merge into one `ToolSet` via `agentTools(this)`. → [`examples/compiled-cli`](./examples/compiled-cli)
-- **A single-file executable** — `ayjnt compile` packs your agents, their UIs, `cli.ts`, the Bun runtime and workerd into one binary that runs with no Bun, no `node_modules` and no wrangler. → [`examples/compiled-cli`](./examples/compiled-cli)
+- **Coding harness** — a full-screen OpenTUI coding agent, host tools, durable
+  sessions, and a browser transcript and usage dashboard. →
+  [`examples/code`](./examples/code)
+- **Realtime voice** — low-latency Gemini Live audio with an expressive,
+  audio-reactive browser interface. →
+  [`examples/realtime-voice`](./examples/realtime-voice)
+- **Chess arena** — play an agent or orchestrate two providers, with server-side
+  rules and model output constrained to legal moves. →
+  [`examples/chess`](./examples/chess)
+- **Scheduled monitor** — one-time, recurring, and cron endpoint checks in one
+  practical scheduling example. →
+  [`examples/scheduler`](./examples/scheduler)
+- **Human review workflow** — durable preparation steps followed by a visible,
+  persistent approval gate. →
+  [`examples/workflow`](./examples/workflow)
+- **Research team** — a lead agent delegates to researcher and reviewer agents
+  through typed RPC and exposes every handoff. →
+  [`examples/orchestration`](./examples/orchestration)
 
-For bigger end-to-end apps — multiplayer games, AI chatbots, RAG pipelines, multi-agent systems — browse the full gallery in [`examples/`](./examples).
-
-## Two targets
+## Two ways to run
 
 The same agents ship two ways, and they are not equivalent.
 
@@ -134,7 +145,7 @@ Migrations are append-only and derived from your folder tree: renaming an agent 
 
 ## Going deeper
 
-- [`examples/`](./examples) — runnable reference projects, smallest to largest
+- [`examples/`](./examples) — six complete, runnable harnesses
 - [`src/README.md`](./src/README.md) — package architecture and the codegen pipeline
 - [`src/codegen/README.md`](./src/codegen/README.md) — contracts between pipeline stages
 - [`src/runtime/README.md`](./src/runtime/README.md) — runtime helpers, RPC gotchas
@@ -145,7 +156,7 @@ Migrations are append-only and derived from your folder tree: renaming an agent 
 bun install
 bun test          # run all tests
 bunx tsc --noEmit # typecheck
-bun run bin/ayjnt.ts build --cwd examples/basic
+bun run bin/ayjnt.ts build --cwd examples/scheduler
 ```
 
 ## License

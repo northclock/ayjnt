@@ -183,5 +183,5 @@ temp dir.
 - [`ayjnt-tools`](../ayjnt-tools/SKILL.md) — `tools.ts` vs
   `tools.host.ts`, and the permission model behind
   `--allow-host-writes`.
-- [`examples/compiled-cli`](../../../examples/compiled-cli) — an app
-  with agents, both kinds of tools, and a `cli.ts`, in one binary.
+- [`examples/code`](../../../examples/code) — an app with agents,
+  permissioned host tools, and a full-screen `cli.ts`.

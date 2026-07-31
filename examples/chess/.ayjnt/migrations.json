@@ -3,7 +3,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "timestamp": "2026-04-15T17:25:54.865Z",
+      "timestamp": "2026-07-31T02:18:53.821Z",
       "new_sqlite_classes": [
         "MatchAgent"
       ]

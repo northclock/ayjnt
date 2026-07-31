@@ -1,0 +1,75 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Code from "../../components/Code.astro";
+
+const tree = `my-agent/
+├── agents/
+│   ├── app.tsx                  # optional home dashboard at /
+│   ├── middleware.ts           # applies to every route
+│   ├── inventory/
+│   │   ├── agent.ts            # /inventory/:instance
+│   │   ├── app.tsx             # browser interface
+│   │   ├── tools.ts            # isolated workerd tools
+│   │   ├── tools.host.ts       # permissioned Bun host tools
+│   │   ├── workflow.ts         # co-located durable workflow
+│   │   └── docs.md             # route documentation
+│   └── orders/
+│       └── agent.ts            # /orders/:instance
+├── cli.ts                      # terminal interface
+├── package.json
+└── tsconfig.json`;
+---
+
+<DocsLayout
+  title="File conventions"
+  description="The public API starts with a small set of files. Their location determines routing, generated types, and runtime behavior."
+  eyebrow="Reference"
+>
+  <h2 id="visual-map">The whole project at a glance</h2>
+  <p>
+    Start with <code>agent.ts</code>. Add neighboring files only when the
+    agent needs that interface or capability. Folder paths become routes;
+    the final URL segment chooses a durable instance.
+  </p>
+  <Code title="project tree" language="text" code={tree} />
+
+  <h2 id="files">Files and where to learn them</h2>
+  <table>
+    <thead><tr><th>File</th><th>Purpose</th><th>Learn it</th></tr></thead>
+    <tbody>
+      <tr><td><code>agent.ts</code></td><td>State, lifecycle, callable methods, and behavior in workerd.</td><td><a href="/docs/writing-agents/">Write an agent →</a></td></tr>
+      <tr><td><code>app.tsx</code></td><td>Browser UI with a generated, route-bound hook.</td><td><a href="/docs/client/">Browser client →</a></td></tr>
+      <tr><td><code>agents/app.tsx</code></td><td>Home dashboard or cross-agent interface at <code>/</code>.</td><td><a href="/docs/human-interfaces/">Human interfaces →</a></td></tr>
+      <tr><td><code>tools.ts</code></td><td>Model tools executed beside the agent in workerd.</td><td><a href="/docs/tools/">Tools →</a></td></tr>
+      <tr><td><code>tools.host.ts</code></td><td>Explicit file, shell, database, and Bun host capabilities.</td><td><a href="/docs/host-bridge/">Host bridge →</a></td></tr>
+      <tr><td><code>workflow.ts</code></td><td>Co-located durable, multi-step work.</td><td><a href="/docs/workflows/">Workflows →</a></td></tr>
+      <tr><td><code>middleware.ts</code></td><td>Inherited authentication, logging, and request policy.</td><td><a href="/docs/routing/">Routing & middleware →</a></td></tr>
+      <tr><td><code>docs.md</code></td><td>Agent-specific documentation behind the same middleware.</td><td><a href="/docs/file-conventions/#route-docs">Route docs ↓</a></td></tr>
+      <tr><td><code>cli.ts</code></td><td>Foreground terminal program powered by Bun.</td><td><a href="/docs/cli/run/">Run command →</a></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="routing">Routing</h2>
+  <p>
+    <code>agents/research/agent.ts</code> is available at
+    <code>/research/:instance</code>. The instance segment identifies durable
+    state: <code>/research/acme</code> and <code>/research/personal</code> are
+    independent agents.
+  </p>
+
+  <h2 id="groups">Route groups</h2>
+  <p>
+    Parenthesized folders organize code and apply middleware without becoming
+    part of the URL. For example,
+    <code>agents/(internal)/review/agent.ts</code> still maps to
+    <code>/review/:instance</code>.
+  </p>
+
+  <h2 id="route-docs">Route documentation</h2>
+  <p>
+    A neighboring <code>docs.md</code> is served at
+    <code>/inventory/docs</code> and passes through the same middleware as the
+    agent. Use it for operator instructions or an agent-specific contract;
+    use this website’s tutorials for framework concepts.
+  </p>
+</DocsLayout>

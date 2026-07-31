@@ -564,7 +564,7 @@ const PAREN_CHUNK = "(?:[^()]|\\([^()]*\\))*";
  * Find every method on the agent class that should appear in
  * `/__ayjnt/catalog`. Two markers trigger inclusion:
  *
- *   1. **`@callable()` decorator from `"agents"`** (primary). The same
+ *   1. **`@callable()` decorator from `"ayjnt"` or `"agents"`** (primary). The same
  *      decorator that makes the method invocable from a browser client
  *      via `agent.stub.method(...)`. Including it in the catalog
  *      automatically means "what's reachable from the browser" and

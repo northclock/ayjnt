@@ -1,0 +1,29 @@
+---
+const path = Astro.url.pathname;
+---
+
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Ayjnt home">
+    <span class="brand-mark"><img src="/mascot.svg" alt="" /></span>
+    <span>ayjnt</span>
+  </a>
+  <nav class="main-nav" aria-label="Primary navigation">
+    <a class:list={{ active: path.startsWith("/docs") }} href="/docs/">Docs</a>
+    <a class:list={{ active: path.startsWith("/examples") }} href="/examples/">Examples</a>
+    <a href="https://github.com/northclock/ayjnt">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="header-cta" href="/docs/getting-started/">Get started <span aria-hidden="true">→</span></a>
+  <button class="menu-button" type="button" aria-label="Toggle navigation" aria-expanded="false">
+    <span></span><span></span>
+  </button>
+</header>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>(".menu-button");
+  const nav = document.querySelector<HTMLElement>(".main-nav");
+  button?.addEventListener("click", () => {
+    const open = button.getAttribute("aria-expanded") === "true";
+    button.setAttribute("aria-expanded", String(!open));
+    nav?.classList.toggle("open", !open);
+  });
+</script>

@@ -3,22 +3,16 @@
   "migrations": [
     {
       "tag": "v1",
-      "timestamp": "2026-04-27T06:16:19.130Z",
+      "timestamp": "2026-07-31T02:18:53.806Z",
       "new_sqlite_classes": [
-        "CarbonAgent",
-        "RemindersAgent"
+        "MonitorAgent"
       ]
     }
   ],
   "classes": {
-    "carbon": {
-      "agentId": "carbon",
-      "className": "CarbonAgent",
-      "firstTag": "v1"
-    },
-    "reminders": {
-      "agentId": "reminders",
-      "className": "RemindersAgent",
+    "monitor": {
+      "agentId": "monitor",
+      "className": "MonitorAgent",
       "firstTag": "v1"
     }
   }

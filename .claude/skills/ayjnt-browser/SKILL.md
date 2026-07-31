@@ -120,8 +120,6 @@ const tools = browserTools(this, { cdpUrl: "http://localhost:9222" });
 
 ## Reference
 
-- [`examples/browser-tools`](../../../examples/browser-tools) — full
-  ResearchAgent with `generateText` integration.
 - [`src/runtime/browser.ts`](../../../src/runtime/browser.ts) — the
   thin wrapper. Two lines of real logic.
 - [Cloudflare's Browser Rendering docs](https://developers.cloudflare.com/agents/api-reference/browse-the-web/).

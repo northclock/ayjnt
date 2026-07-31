@@ -218,6 +218,6 @@ execution.
 
 ## Reference
 
-- [`examples/workflows`](../../../examples/workflows) — OrdersAgent +
-  OrdersProcessing pair that this skill is based on.
+- [`examples/workflow`](../../../examples/workflow) — durable content
+  preparation followed by a human approval gate.
 - [Cloudflare's Workflow + Agents docs](https://developers.cloudflare.com/agents/api-reference/run-workflows/).

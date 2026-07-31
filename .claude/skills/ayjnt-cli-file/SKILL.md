@@ -182,7 +182,7 @@ The alternative is `.fetch()`, where errors propagate normally.
 
 ## Reference
 
-- [`examples/compiled-cli`](../../../examples/compiled-cli) — the
-  `cli.ts` this skill is drawn from.
+- [`examples/code`](../../../examples/code) — a full-screen OpenTUI
+  `cli.ts` driving a durable coding agent.
 - [`ayjnt-tools`](../ayjnt-tools/SKILL.md) — the tools a `cli.ts`-driven
   app can expose to a model, including host tools.

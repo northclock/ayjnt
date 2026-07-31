@@ -123,9 +123,10 @@ export function generateEntry(
 
   // For agents that have a co-located workflow.ts (same parent directory),
   // inject the workflow's binding name onto the agent's prototype. The
-  // `withWorkflow` mixin reads this at call time so users can write
+  // Ayjnt Agent base reads this at call time so users can write
   // `this.workflow(params)` without a magic binding string. The property
-  // is non-enumerable so it doesn't show up in user-facing serialization.
+  // remains compatible with the deprecated `withWorkflow` mixin and is
+  // non-enumerable so it doesn't show up in user-facing serialization.
   const workflowBindingPatches = workflows
     .map((w) => {
       const workflowDir = path.dirname(w.sourceFile);
@@ -136,6 +137,22 @@ export function generateEntry(
       return `Object.defineProperty(${agentLocal.get(pairedAgent)!}.prototype, "__ayjntWorkflowBinding", { value: ${JSON.stringify(w.binding)}, enumerable: false });`;
     })
     .filter((s): s is string => s !== null)
+    .join("\n");
+
+  // Every Ayjnt Agent gets the same generated class → binding lookup. The
+  // constructor is both the type-inference source and a runtime-safe key, so
+  // `this.agent(InventoryAgent, "primary")` needs no string route or env field.
+  const agentBindings = `new Map([${agents
+    .map(
+      (agent) =>
+        `[${agentLocal.get(agent)!}, ${JSON.stringify(agent.binding)}]`,
+    )
+    .join(", ")}])`;
+  const agentBindingPatches = agents
+    .map(
+      (agent) =>
+        `Object.defineProperty(${agentLocal.get(agent)!}.prototype, "__ayjntAgentBindings", { value: ${agentBindings}, enumerable: false });`,
+    )
     .join("\n");
 
   const middlewareImports = [...middlewareIndex.entries()]
@@ -258,6 +275,7 @@ ${toolImports}
 ${agentReexports}
 ${workflowReexports}
 
+${agentBindingPatches}
 ${workflowBindingPatches}
 ${toolPatches}
 

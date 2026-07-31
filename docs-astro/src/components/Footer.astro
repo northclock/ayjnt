@@ -1,62 +1,25 @@
----
-import Logo from "./Logo.astro";
----
-<footer class="mt-24 border-t border-[var(--ink)] bg-[var(--paper-edge)]">
-	<div class="mx-auto grid max-w-6xl gap-10 px-6 py-14 md:grid-cols-4">
-		<div class="md:col-span-2">
-			<Logo />
-			<p class="mt-3 max-w-sm font-mono text-xs leading-relaxed text-[var(--ink-muted)]">
-				Agent-first framework for Cloudflare. No worker boilerplate, no
-				wrangler wrestling.
-			</p>
-		</div>
-		<div>
-			<h4 class="mb-3 font-mono text-xs uppercase tracking-widest text-[var(--ink-muted)]">
-				Project
-			</h4>
-			<ul class="space-y-2 text-sm">
-				<li><a href="/" class="link-underline">Home</a></li>
-				<li><a href="/examples" class="link-underline">Examples</a></li>
-				<li><a href="/docs" class="link-underline">Docs</a></li>
-			</ul>
-		</div>
-		<div>
-			<h4 class="mb-3 font-mono text-xs uppercase tracking-widest text-[var(--ink-muted)]">
-				External
-			</h4>
-			<ul class="space-y-2 text-sm">
-				<li>
-					<a href="https://github.com/northclock/ayjnt" class="link-underline" target="_blank" rel="noreferrer">
-						GitHub
-					</a>
-				</li>
-				<li>
-					<a href="https://www.npmjs.com/package/ayjnt" class="link-underline" target="_blank" rel="noreferrer">
-						npm
-					</a>
-				</li>
-				<li>
-					<a href="https://developers.cloudflare.com/agents/" class="link-underline" target="_blank" rel="noreferrer">
-						Cloudflare Agents
-					</a>
-				</li>
-				<li>
-					<a href="https://x.com/ayjntframework" class="link-underline" target="_blank" rel="noreferrer">
-						X
-					</a>
-				</li>
-				<li>
-					<a href="https://www.instagram.com/ayjntframework" class="link-underline" target="_blank" rel="noreferrer">
-						Instagram
-					</a>
-				</li>
-			</ul>
-		</div>
-	</div>
-	<div class="border-t border-[var(--rule-strong)] bg-[var(--paper)]">
-		<div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 font-mono text-xs text-[var(--ink-muted)]">
-			<span>ayjnt is not affiliated with Cloudflare.</span>
-			<span>MIT</span>
-		</div>
-	</div>
+<footer class="site-footer">
+  <div class="footer-brand">
+    <span class="brand-mark"><img src="/mascot.svg" alt="" /></span>
+    <div>
+      <strong>ayjnt</strong>
+      <p>An agent harness framework for people and their agents.</p>
+    </div>
+  </div>
+  <div class="footer-links">
+    <div>
+      <span>Explore</span>
+      <a href="/docs/">Documentation</a>
+      <a href="/examples/">Examples</a>
+    </div>
+    <div>
+      <span>Project</span>
+      <a href="https://github.com/northclock/ayjnt">GitHub ↗</a>
+      <a href="https://www.npmjs.com/package/ayjnt">npm ↗</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>Built with Bun + workerd.</span>
+    <span>Open source.</span>
+  </div>
 </footer>

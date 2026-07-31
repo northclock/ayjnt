@@ -1,0 +1,57 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Code from "../../components/Code.astro";
+import { referenceDocs, type ReferenceDoc } from "../../content/referenceDocs";
+
+export function getStaticPaths() {
+  return referenceDocs.map((entry) => ({
+    params: { slug: entry.slug },
+    props: { entry },
+  }));
+}
+
+interface Props {
+  entry: ReferenceDoc;
+}
+
+const { entry } = Astro.props;
+---
+
+<DocsLayout
+  title={entry.title}
+  description={entry.description}
+  eyebrow={entry.eyebrow}
+>
+  {entry.sections.map((section) => (
+    <section class="reference-section">
+      <h2>{section.title}</h2>
+      {section.body?.map((paragraph) => <p set:html={paragraph} />)}
+      {section.bullets && (
+        <ul>
+          {section.bullets.map((item) => <li set:html={item} />)}
+        </ul>
+      )}
+      {section.table && (
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>{section.table.headers.map((header) => <th>{header}</th>)}</tr>
+            </thead>
+            <tbody>
+              {section.table.rows.map((row) => (
+                <tr>{row.map((cell) => <td set:html={cell} />)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {section.code && <Code title={section.codeTitle ?? "example"} code={section.code} />}
+      {section.note && (
+        <aside class="callout">
+          <strong>{section.note.title}</strong>
+          <p set:html={section.note.body} />
+        </aside>
+      )}
+    </section>
+  ))}
+</DocsLayout>

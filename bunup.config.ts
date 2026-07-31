@@ -49,6 +49,7 @@ export default defineConfig([
       "src/runtime/browser.ts",
       "src/runtime/voiceClient.tsx",
       "src/runtime/workflow.ts",
+      "src/runtime/workflows.ts",
     ],
     outDir: "dist",
     format: ["esm"],
@@ -66,7 +67,12 @@ export default defineConfig([
     // block's output flat. Verified by bisection; re-check the dist layout if
     // you add entries here.
     name: "runtime-tools",
-    entry: ["src/runtime/cliContext.ts", "src/runtime/tools.ts"],
+    entry: [
+      "src/runtime/cliContext.ts",
+      "src/runtime/tools.ts",
+      "src/runtime/client.ts",
+      "src/runtime/session.ts",
+    ],
     outDir: "dist",
     format: ["esm"],
     target: "node",

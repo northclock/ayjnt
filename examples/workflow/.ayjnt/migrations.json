@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-07-31T02:18:53.812Z",
+      "new_sqlite_classes": [
+        "ReviewAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "review": {
+      "agentId": "review",
+      "className": "ReviewAgent",
+      "firstTag": "v1"
+    }
+  }
+}

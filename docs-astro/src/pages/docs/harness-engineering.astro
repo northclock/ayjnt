@@ -1,0 +1,47 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout
+  title="Harness engineering"
+  description="Harness engineering is the work of designing the system around a model so an agent can act reliably, safely, and legibly."
+  eyebrow="Concept"
+>
+  <h2 id="model-is-not-the-product">The model is not the product</h2>
+  <p>
+    Model quality matters, but most useful agent behavior comes from the
+    environment around the model. A strong harness gives the model the minimum
+    context it needs, tools with clear contracts, durable state, recovery
+    paths, and timely human input.
+  </p>
+
+  <h2 id="the-loop">A practical harness loop</h2>
+  <ol>
+    <li><strong>Observe:</strong> gather the state, history, and external signals relevant to this turn.</li>
+    <li><strong>Decide:</strong> ask a model or deterministic policy what should happen next.</li>
+    <li><strong>Act:</strong> execute a narrow tool in the appropriate runtime.</li>
+    <li><strong>Record:</strong> persist the result and make it visible.</li>
+    <li><strong>Escalate:</strong> ask a person when intent, authority, or judgment is missing.</li>
+  </ol>
+
+  <h2 id="principles">Five design principles</h2>
+  <div class="concept-grid">
+    <div class="concept-card"><span>01</span><h3>Constrain context</h3><p>More context is not automatically better. Supply what the current decision needs.</p></div>
+    <div class="concept-card"><span>02</span><h3>Make tools small</h3><p>Narrow inputs and outputs are easier to validate, observe, approve, and retry.</p></div>
+    <div class="concept-card"><span>03</span><h3>Separate authority</h3><p>Reading, writing, and executing on a host should be visibly different capabilities.</p></div>
+    <div class="concept-card"><span>04</span><h3>Design for interruption</h3><p>Long work needs checkpoints, resumability, cancellation, and human approval.</p></div>
+    <div class="concept-card"><span>05</span><h3>Expose the work</h3><p>People should see what an agent knows, what it is doing, and where it needs help.</p></div>
+  </div>
+
+  <h2 id="human-in-loop">Human interaction is architecture</h2>
+  <p>
+    Human-in-the-loop is not a confirmation dialog added at the end. It changes
+    how work is modeled. A harness needs durable pause points, clear previews of
+    proposed actions, enough context for a person to decide, and a way to resume
+    without repeating completed work.
+  </p>
+  <div class="callout">
+    <strong>A useful approval contains a decision</strong>
+    <p>Show the proposed action, its consequences, and the exact scope of the authority being requested.</p>
+  </div>
+</DocsLayout>

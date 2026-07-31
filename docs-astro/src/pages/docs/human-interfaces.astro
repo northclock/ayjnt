@@ -1,0 +1,46 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout
+  title="Human interfaces"
+  description="An agent is easier to trust and direct when its interface lives with its behavior and reflects its real state."
+  eyebrow="Concept"
+>
+  <h2 id="browser">Browser: <code>app.tsx</code></h2>
+  <p>
+    Co-locate a React interface beside any agent. Ayjnt generates a typed hook
+    for the agent route, serves the app at the instance URL, and synchronizes
+    durable state to connected clients.
+  </p>
+  <p>
+    Use the browser when the work benefits from visualization, ongoing
+    monitoring, rich input, collaboration, or an approval surface. A root
+    <code>agents/app.tsx</code> can provide an application-level home,
+    dashboard, or session list.
+  </p>
+
+  <h2 id="terminal">Terminal: <code>cli.ts</code></h2>
+  <p>
+    A root CLI runs in Bun and receives typed handles to every agent and
+    workflow. It can be a one-shot command, an interactive prompt, or a
+    full-screen terminal application. Because it owns the local runtime, calls
+    reach agents in-process.
+  </p>
+  <p>
+    Use the terminal when work starts from a repository, composes well in
+    scripts, needs local files, or belongs in a developer's existing flow.
+  </p>
+
+  <h2 id="both">Use both</h2>
+  <p>
+    The interfaces are peers, not separate backends. A coding harness can run
+    in a full-screen terminal while its root browser app shows every session,
+    transcript, and usage total. Both interact with the same durable agent
+    state.
+  </p>
+  <div class="callout">
+    <strong>Design the interface around the decision</strong>
+    <p>A status dashboard, an approval queue, a chess board, and a coding terminal are all agent interfaces. Ayjnt does not force them into a chat box.</p>
+  </div>
+</DocsLayout>

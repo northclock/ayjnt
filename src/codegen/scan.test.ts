@@ -35,6 +35,28 @@ describe("parseAgentSource", () => {
     ).toEqual({ className: "ChatAgent", baseClass: "Agent", agentId: null });
   });
 
+  test("accepts both Ayjnt and Cloudflare Agent imports", () => {
+    const ayjnt = `
+      import { Agent } from "ayjnt";
+      export default class AyjntAgent extends Agent<Env, State> {}
+    `;
+    const cloudflare = `
+      import { Agent } from "agents";
+      export default class CloudflareAgent extends Agent<Env, State> {}
+    `;
+
+    expect(parseAgentSource(ayjnt)).toEqual({
+      className: "AyjntAgent",
+      baseClass: "Agent",
+      agentId: null,
+    });
+    expect(parseAgentSource(cloudflare)).toEqual({
+      className: "CloudflareAgent",
+      baseClass: "Agent",
+      agentId: null,
+    });
+  });
+
   test("extracts agentId override when present", () => {
     const src = `
       export const agentId = "chat_v1";

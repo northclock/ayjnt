@@ -21,8 +21,8 @@ is a fallback for the rare "advertised in the catalog but not exposed
 over WebSocket" case (e.g., agent-to-agent RPC methods you want
 discoverable).
 
-See [`examples/callable-client`](../../../examples/callable-client)
-for a worked example.
+See [`examples/orchestration`](../../../examples/orchestration)
+for a worked inter-agent RPC example.
 
 ## Pattern 1 — agent-to-agent: `getAgent<T>`
 
@@ -333,10 +333,6 @@ curl http://localhost:8787/__ayjnt/catalog \
 
 ## Reference
 
-- [`examples/inter-agent`](../../../examples/inter-agent) — Pattern 1
-  (`getAgent<T>` between Orders and Inventory).
-- [`examples/callable-client`](../../../examples/callable-client) —
-  Patterns 1, 2, and 3 on one set of methods.
-- [`examples/catalog`](../../../examples/catalog) — Pattern 3 with
-  a React UI rendering `/__ayjnt/catalog` live.
+- [`examples/orchestration`](../../../examples/orchestration) — typed
+  `getAgent<T>` calls across lead, researcher, and reviewer agents.
 - [Cloudflare's @callable docs](https://developers.cloudflare.com/agents/api-reference/callable-methods/).

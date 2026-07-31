@@ -1,0 +1,44 @@
+---
+import { codeToHtml } from "shiki";
+
+interface Props {
+  title?: string;
+  language?: string;
+  code: string;
+}
+
+const { title, language, code } = Astro.props;
+const inferredLanguage =
+  language ??
+  (title === "terminal"
+    ? "bash"
+    : title?.endsWith(".tsx")
+      ? "tsx"
+      : title?.endsWith(".json") || title?.endsWith(".jsonc")
+        ? "json"
+        : title?.endsWith(".md")
+          ? "markdown"
+          : "typescript");
+const highlighted = await codeToHtml(code, {
+  lang: inferredLanguage,
+  theme: "github-dark-default",
+});
+---
+
+<div class="code-window">
+  <div class="code-bar">
+    <span>{title ?? inferredLanguage}</span>
+    <button type="button" class="copy-button" data-copy={code} aria-label="Copy code">copy</button>
+  </div>
+  <div class="highlighted-code" set:html={highlighted} />
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>(".copy-button").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(button.dataset.copy ?? "");
+      button.textContent = "copied";
+      window.setTimeout(() => (button.textContent = "copy"), 1200);
+    });
+  });
+</script>

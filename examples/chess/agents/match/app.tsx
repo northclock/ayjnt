@@ -1,253 +1,120 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Chess } from "chess.js";
 import { useAgent } from "@ayjnt/match";
+import type { PlayerConfig } from "./agent";
 
-const GLYPH: Record<string, string> = {
-  wK: "♔", wQ: "♕", wR: "♖", wB: "♗", wN: "♘", wP: "♙",
-  bK: "♚", bQ: "♛", bR: "♜", bB: "♝", bN: "♞", bP: "♟",
+const glyphs: Record<string, string> = {
+  wp: "♙", wn: "♘", wb: "♗", wr: "♖", wq: "♕", wk: "♔",
+  bp: "♟", bn: "♞", bb: "♝", br: "♜", bq: "♛", bk: "♚",
 };
-
-const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
-
-function pickName(): string {
-  const stored = localStorage.getItem("ayjnt-chess-name");
-  if (stored) return stored;
-  const name = prompt("Display name?") ?? "guest";
-  const trimmed = name.trim().slice(0, 24) || "guest";
-  localStorage.setItem("ayjnt-chess-name", trimmed);
-  return trimmed;
-}
+type Mode = "human-white" | "human-black" | "agents";
 
 export default function Match() {
-  const [name] = useState(pickName);
-  const [selected, setSelected] = useState<number | null>(null);
   const agent = useAgent();
-
-  useEffect(() => {
-    agent.send(JSON.stringify({ kind: "hello", name }));
-  }, [agent, name]);
-
+  const [mode, setMode] = useState<Mode>("human-white");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [white, setWhite] = useState<PlayerConfig>({ provider: "openai" });
+  const [black, setBlack] = useState<PlayerConfig>({ provider: "gemini" });
   const state = agent.state;
-  if (!state) return <main style={styles.loading}>connecting…</main>;
+  const chess = useMemo(() => new Chess(state?.fen), [state?.fen]);
 
-  const join = (side: "w" | "b") =>
-    agent.send(JSON.stringify({ kind: "join", side }));
-  const reset = () => agent.send(JSON.stringify({ kind: "reset" }));
+  const humanSide = mode === "human-white" ? "w" : mode === "human-black" ? "b" : null;
+  useEffect(() => {
+    if (!state || state.thinking || chess.isGameOver() || chess.turn() === humanSide) return;
+    const config = chess.turn() === "w" ? white : black;
+    const timer = window.setTimeout(() => {
+      void agent.call("askModel", [chess.turn(), config]);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [agent, black, chess, humanSide, state, white]);
 
-  // We don't know our own connection id, but the server echoes our name on
-  // the seat we're holding, so compare names to figure out which side we are.
-  const mySide =
-    state.whiteName === name ? "w" : state.blackName === name ? "b" : null;
-  const myTurn = mySide && mySide === state.toMove && !state.result;
-
-  const click = (i: number) => {
-    if (state.result) return;
-    if (!myTurn) return;
-    if (selected === null) {
-      const piece = state.board[i];
-      if (piece && piece.color === mySide) setSelected(i);
+  if (!state) return <main style={styles.main}>Connecting…</main>;
+  const board = chess.board().flat();
+  const click = async (index: number) => {
+    if (chess.turn() !== humanSide || state.thinking) return;
+    const square = `${"abcdefgh"[index % 8]}${8 - Math.floor(index / 8)}`;
+    if (!selected) {
+      const piece = board[index];
+      if (piece?.color === humanSide) setSelected(square);
       return;
     }
-    if (selected === i) {
-      setSelected(null);
-      return;
-    }
-    agent.send(JSON.stringify({ kind: "move", from: selected, to: i }));
+    await agent.call("move", [`${selected}${square}`]);
     setSelected(null);
   };
 
   return (
     <main style={styles.main}>
       <header style={styles.header}>
-        <h1 style={styles.title}>match — {agent.name}</h1>
-        <div style={styles.seats}>
-          <SeatPill
-            color="w"
-            seatedName={state.whiteName}
-            you={mySide === "w"}
-            onJoin={() => join("w")}
-          />
-          <SeatPill
-            color="b"
-            seatedName={state.blackName}
-            you={mySide === "b"}
-            onJoin={() => join("b")}
-          />
-        </div>
+        <div><small style={styles.eyebrow}>CHESS ARENA</small><h1 style={styles.h1}>{agent.name}</h1></div>
+        <select value={mode} onChange={(event) => setMode(event.target.value as Mode)} style={styles.select}>
+          <option value="human-white">Play as White</option>
+          <option value="human-black">Play as Black</option>
+          <option value="agents">Two agents</option>
+        </select>
       </header>
-
-      <div style={styles.status}>
-        {state.result
-          ? state.result === "draw"
-            ? "draw"
-            : `${state.result} wins`
-          : `${state.toMove === "w" ? "white" : "black"} to move${
-              myTurn ? " — your move" : ""
-            }`}
+      <div style={styles.layout}>
+        <section>
+          <div style={styles.status}>{state.thinking ? `${state.thinking === "w" ? "White" : "Black"} is thinking…` : state.status}</div>
+          <div style={styles.board}>
+            {board.map((piece, index) => {
+              const square = `${"abcdefgh"[index % 8]}${8 - Math.floor(index / 8)}`;
+              return (
+                <button key={square} onClick={() => click(index)} style={{
+                  ...styles.square,
+                  background: (Math.floor(index / 8) + index) % 2 ? "#5573a9" : "#e7e7df",
+                  outline: selected === square ? "3px solid #ff9254" : "none",
+                }}>
+                  {piece ? glyphs[piece.color + piece.type] : ""}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+        <aside style={styles.sidebar}>
+          <Player title="White" value={white} onChange={setWhite} disabled={humanSide === "w"} />
+          <Player title="Black" value={black} onChange={setBlack} disabled={humanSide === "b"} />
+          <button onClick={() => agent.call("reset", [])} style={styles.reset}>New game</button>
+          <ol style={styles.moves}>{state.history.map((move, index) => <li key={index}>{index + 1}. {move}</li>)}</ol>
+        </aside>
       </div>
-
-      <div style={styles.board}>
-        {state.board.map((piece, i) => {
-          const r = Math.floor(i / 8);
-          const c = i % 8;
-          const dark = (r + c) % 2 === 1;
-          const isSelected = selected === i;
-          return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => click(i)}
-              style={{
-                ...styles.sq,
-                background: dark ? "#b58863" : "#f0d9b5",
-                ...(isSelected ? styles.sqSelected : null),
-              }}
-            >
-              {piece && (
-                <span style={piece.color === "w" ? styles.wPiece : styles.bPiece}>
-                  {GLYPH[piece.color + piece.type]}
-                </span>
-              )}
-              {c === 0 && <span style={styles.rankLabel}>{8 - r}</span>}
-              {r === 7 && <span style={styles.fileLabel}>{FILES[c]}</span>}
-            </button>
-          );
-        })}
-      </div>
-
-      <ol style={styles.history}>
-        {state.history.map((m, i) => (
-          <li key={i} style={styles.move}>
-            {Math.floor(i / 2) + 1}.{i % 2 === 0 ? "" : ".."} {m.san}
-            {m.capture ? "×" : ""}
-          </li>
-        ))}
-      </ol>
-
-      {state.result && mySide && (
-        <button style={styles.reset} onClick={reset}>
-          new game
-        </button>
-      )}
     </main>
   );
 }
 
-function SeatPill({
-  color,
-  seatedName,
-  you,
-  onJoin,
-}: {
-  color: "w" | "b";
-  seatedName: string | null;
-  you: boolean;
-  onJoin: () => void;
+function Player({ title, value, onChange, disabled }: {
+  title: string; value: PlayerConfig; onChange: (value: PlayerConfig) => void; disabled: boolean;
 }) {
-  const open = !seatedName;
   return (
-    <button
-      style={{
-        ...styles.seat,
-        background: color === "w" ? "#fff" : "#222",
-        color: color === "w" ? "#222" : "#fff",
-        ...(you ? styles.seatYou : null),
-        ...(open ? styles.seatOpen : null),
-      }}
-      onClick={open ? onJoin : undefined}
-      disabled={!open}
-    >
-      {color === "w" ? "♔ white" : "♚ black"}:{" "}
-      {seatedName ?? "click to take seat"}
-    </button>
+    <fieldset style={{ ...styles.player, opacity: disabled ? 0.45 : 1 }} disabled={disabled}>
+      <legend>{title} {disabled ? "· human" : "· agent"}</legend>
+      <select value={value.provider} onChange={(event) => onChange({ ...value, provider: event.target.value as PlayerConfig["provider"] })} style={styles.select}>
+        <option value="openai">OpenAI</option><option value="gemini">Gemini</option>
+        <option value="claude">Claude</option><option value="ollama">Ollama</option>
+      </select>
+      {value.provider === "ollama" ? (
+        <input placeholder="http://localhost:11434" value={value.baseUrl ?? ""} onChange={(event) => onChange({ ...value, baseUrl: event.target.value })} style={styles.input} />
+      ) : (
+        <input type="password" placeholder={`${value.provider} API key`} value={value.apiKey ?? ""} onChange={(event) => onChange({ ...value, apiKey: event.target.value })} style={styles.input} />
+      )}
+      <textarea placeholder="Additional playing style…" value={value.instructions ?? ""} onChange={(event) => onChange({ ...value, instructions: event.target.value })} style={styles.textarea} />
+    </fieldset>
   );
 }
 
 const styles = {
-  main: {
-    fontFamily: "system-ui, sans-serif",
-    maxWidth: 520,
-    margin: "24px auto",
-    padding: 16,
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  title: { margin: 0, fontSize: 18 },
-  seats: { display: "flex", gap: 6 },
-  seat: {
-    border: "1px solid #ccc",
-    borderRadius: 6,
-    padding: "6px 12px",
-    fontSize: 12,
-    cursor: "default",
-  },
-  seatYou: { outline: "2px solid #1d4ed8" },
-  seatOpen: { cursor: "pointer", borderStyle: "dashed" as const },
-  status: { fontSize: 14, color: "#444", margin: "12px 0 4px", minHeight: 20 },
-  board: {
-    display: "grid",
-    gridTemplateColumns: "repeat(8, 56px)",
-    gridTemplateRows: "repeat(8, 56px)",
-    border: "2px solid #333",
-  },
-  sq: {
-    position: "relative" as const,
-    border: "none",
-    padding: 0,
-    fontSize: 36,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    lineHeight: 1,
-  },
-  sqSelected: {
-    boxShadow: "inset 0 0 0 3px #fbbf24",
-  },
-  wPiece: { color: "#fff", textShadow: "0 0 1px #000, 0 1px 2px rgba(0,0,0,.4)" },
-  bPiece: { color: "#000", textShadow: "0 0 1px #fff" },
-  rankLabel: {
-    position: "absolute" as const,
-    top: 2,
-    left: 4,
-    fontSize: 10,
-    color: "rgba(0,0,0,.45)",
-  },
-  fileLabel: {
-    position: "absolute" as const,
-    bottom: 2,
-    right: 4,
-    fontSize: 10,
-    color: "rgba(0,0,0,.45)",
-  },
-  history: {
-    listStyle: "none",
-    padding: 0,
-    margin: "16px 0",
-    display: "flex",
-    flexWrap: "wrap" as const,
-    gap: "4px 12px",
-    fontFamily: "ui-monospace, monospace",
-    fontSize: 13,
-    color: "#555",
-  },
-  move: {},
-  reset: {
-    marginTop: 12,
-    padding: "10px 16px",
-    background: "#1d4ed8",
-    color: "white",
-    border: "none",
-    borderRadius: 6,
-    fontSize: 14,
-    cursor: "pointer",
-  },
-  loading: {
-    fontFamily: "system-ui, sans-serif",
-    textAlign: "center" as const,
-    padding: 40,
-    color: "#666",
-  },
+  main: { fontFamily: "system-ui, sans-serif", maxWidth: 1050, margin: "0 auto", padding: "30px 20px", color: "#172033" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "end", marginBottom: 24 },
+  eyebrow: { color: "#225dd8", fontFamily: "monospace", letterSpacing: "0.16em" },
+  h1: { margin: "5px 0 0", fontSize: 32 },
+  layout: { display: "grid", gridTemplateColumns: "minmax(420px, 640px) 1fr", gap: 25 },
+  status: { minHeight: 24, color: "#697180", fontSize: 13 },
+  board: { display: "grid", gridTemplateColumns: "repeat(8, 1fr)", aspectRatio: "1", border: "8px solid #172033" },
+  square: { border: 0, display: "grid", placeItems: "center", fontSize: "clamp(28px, 5vw, 54px)", padding: 0, cursor: "pointer" },
+  sidebar: { display: "grid", gap: 13, alignContent: "start" },
+  player: { display: "grid", gap: 8, border: "1px solid #d8dce2", borderRadius: 10, padding: 14 },
+  select: { padding: "9px 10px", borderRadius: 7, border: "1px solid #cfd4dc", background: "white" },
+  input: { padding: 9, borderRadius: 7, border: "1px solid #cfd4dc" },
+  textarea: { padding: 9, borderRadius: 7, border: "1px solid #cfd4dc", minHeight: 62, resize: "vertical" as const },
+  reset: { padding: 10, background: "#172033", color: "white", border: 0, borderRadius: 8 },
+  moves: { maxHeight: 160, overflow: "auto", columns: 2, fontFamily: "monospace", fontSize: 11, color: "#697180" },
 };

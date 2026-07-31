@@ -154,6 +154,4 @@ MCP agents (the MCP transport handles sessions itself).
 
 ## Reference
 
-- [`examples/mcp`](../../../examples/mcp) — tools agent with `echo`
-  and `add`, plus a client script that lists and calls them.
 - [Model Context Protocol spec](https://modelcontextprotocol.io/).

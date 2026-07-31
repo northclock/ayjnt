@@ -519,6 +519,26 @@ describe("generateEntry", () => {
     );
   });
 
+  test("injects the generated class-to-binding registry on every agent", () => {
+    const out = generateEntry(
+      mf([
+        agent({}),
+        agent({
+          className: "InventoryAgent",
+          routePath: "/inventory",
+          binding: "INVENTORY_AGENT",
+          sourceFile: "/fake/agents/inventory/agent.ts",
+          folderPath: "inventory",
+        }),
+      ]),
+      OUT,
+    );
+    expect(out).toContain("__ayjntAgentBindings");
+    expect(out).toContain(
+      `new Map([[__ayjnt_agent_0, "CHAT_AGENT"], [__ayjnt_agent_1, "INVENTORY_AGENT"]])`,
+    );
+  });
+
   test("non-co-located workflow: no prototype patch emitted", () => {
     const out = generateEntry(
       mf(
