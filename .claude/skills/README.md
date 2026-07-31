@@ -17,6 +17,9 @@ to what the codegen pipeline wires up at build time.
 | [`ayjnt-voice`](./ayjnt-voice/SKILL.md) | "Voice agent", "STT + TTS", "make the agent talk", "Workers AI voice". | Wraps the agent in `withVoice(Agent)` with Workers AI providers; generates a typed `useVoiceAgent` hook. |
 | [`ayjnt-middleware`](./ayjnt-middleware/SKILL.md) | "Add middleware", "add auth", "gate a subtree", "wrap responses". | Drops `middleware.ts` at the right folder, using the Hono-style `Context` + `next()` pattern. |
 | [`ayjnt-rpc`](./ayjnt-rpc/SKILL.md) | "Call another agent", "agent-to-agent", "inter-agent RPC", "@callable". | Adds an `@callable` method to one agent and the typed `getAgent<T>` call site to another. |
+| [`ayjnt-tools`](./ayjnt-tools/SKILL.md) | "Add a tool", "give the model tools", "let the agent read local files", "tools.host.ts", "sideEffects". | `tools.ts` (workerd) vs `tools.host.ts` (Bun host), merged into one ToolSet by `agentTools(this)`. |
+| [`ayjnt-cli-file`](./ayjnt-cli-file/SKILL.md) | "Add a CLI", "make this a command-line app", "call an agent from a script", "trigger a workflow from outside". | Drops a root-level `cli.ts` with in-process Durable Object RPC and workflow bindings. |
+| [`ayjnt-compile`](./ayjnt-compile/SKILL.md) | "Compile", "make a binary", "ship a CLI", "run without wrangler", "ayjnt run vs ayjnt dev". | `ayjnt run` on ayjnt's own runtime, and `ayjnt compile` to a single-file executable. |
 | [`ayjnt-troubleshoot`](./ayjnt-troubleshoot/SKILL.md) | Specific error strings — "compatibility date", "lockfile drift", "404 on agent", "basePath", "useAgent doesn't work". | Maps known symptoms to root causes and fixes — most are documented gotchas with single-line resolutions. |
 
 ## How they load

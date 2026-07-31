@@ -6,11 +6,26 @@ How the package is organized and how data flows through it.
 
 ```
 src/
-├── cli/        # command entry points (ayjnt dev/build/deploy/migrate)
+├── cli/        # command entry points, plus the local runtime (host.ts, run.ts)
 ├── codegen/    # the pipeline: scan → diff → emit
 ├── core/       # shared types — the single contract between stages
 └── runtime/    # public exports for user code (import ... from "ayjnt")
 ```
+
+There are two execution targets, and the distinction runs through the whole
+package:
+
+- **Deployed** (`ayjnt deploy`) — the generated worker runs on Cloudflare. This
+  is the original and only target the codegen pipeline cares about.
+- **Local** (`ayjnt run`, `ayjnt compile`) — the same worker runs under a workerd
+  that *we* own, in a Bun process that also runs the user's `cli.ts` and any
+  `tools.host.ts`. That Bun process is the "host", and it can do things workerd
+  cannot: filesystem, subprocesses, native SQLite.
+
+The host is what `cli/host.ts` builds, and it's why `core/hostBridge.ts` exists —
+that module is the one wire format shared by both sides of the workerd↔host
+boundary, imported by worker-bundled code (`runtime/tools.ts`) and host code
+(`cli/hostTools.ts`) alike so the protocol can't drift.
 
 ## Request lifecycle (runtime)
 
@@ -56,6 +71,10 @@ Each step is a pure function of its inputs. I/O lives at the edges (`scan`, `rea
 | Change generated worker entrypoint | [`codegen/entry.ts`](./codegen/entry.ts) |
 | Change a type flowing between stages | [`core/types.ts`](./core/types.ts) |
 | Add a user-facing runtime helper | [`runtime/`](./runtime/) |
+| Change how the local runtime is configured | [`cli/host.ts`](./cli/host.ts) — wrangler config → Miniflare options |
+| Change the `cli.ts` context | [`runtime/cliContext.ts`](./runtime/cliContext.ts) for the types, [`cli/host.ts`](./cli/host.ts) for the objects, [`codegen/cli.ts`](./codegen/cli.ts) for the generated view |
+| Change the workerd↔host tool protocol | [`core/hostBridge.ts`](./core/hostBridge.ts) — both sides import it |
+| Change what goes into a compiled binary | [`cli/compile.ts`](./cli/compile.ts) — it generates the bootstrap module |
 
 Deeper guides: [`cli/README.md`](./cli/README.md), [`codegen/README.md`](./codegen/README.md), [`runtime/README.md`](./runtime/README.md).
 

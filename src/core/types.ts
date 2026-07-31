@@ -26,6 +26,40 @@ export type CallableMethod = {
   description: string | null;
 };
 
+/**
+ * A co-located tool collection for one agent route — a set of functions the
+ * agent can hand to a model as tool calls.
+ *
+ * Two runtimes, chosen by filename:
+ *
+ *   - `agents/<route>/tools.ts`      → executes inside workerd, alongside the
+ *     agent. Deploys to Cloudflare like any other worker code.
+ *   - `agents/<route>/tools.host.ts` → executes in the Bun host process via
+ *     the `__AYJNT_HOST` bridge, so tools can use `Bun.$`, `Bun.file`,
+ *     `bun:sqlite` and other native capabilities workerd does not have.
+ *
+ * The filename is the only signal — there is deliberately no `"use host"`
+ * directive, because the path already carries that information. What DOES
+ * get checked is the inverse mistake: a workerd-side `tools.ts` reaching for
+ * a Bun/node-only global (see `detectHostOnlyGlobals`).
+ *
+ * Host tools cannot work on deployed Cloudflare — there is no host process
+ * there — so `ayjnt deploy` refuses a project containing them unless the
+ * file opts out via {@link HOST_TOOLS_OPTIONAL_MARKER}.
+ */
+export type ToolsEntry = {
+  /** Absolute path to the tools.ts / tools.host.ts source file. */
+  sourceFile: string;
+  /** Which runtime executes the tool bodies. */
+  runtime: "worker" | "host";
+  /** Route path of the owning agent, e.g. "/research". Used to namespace
+   *  tool names across agents on the host bridge. */
+  routePath: string;
+  /** True when a host tools file is marked as safe to omit from a deploy
+   *  rather than blocking it. Always false for `runtime: "worker"`. */
+  optionalOnDeploy: boolean;
+};
+
 /** A single agent discovered in the file tree. */
 export type AgentEntry = {
   /** Stable identity used by the migration lockfile. Default derived from folderPath;
@@ -61,6 +95,10 @@ export type AgentEntry = {
   isVoice: boolean;
   /** Middleware files that apply to this agent, ordered root → leaf. Absolute paths. */
   middlewareChain: string[];
+  /** Co-located tool collections — at most one per runtime. Empty when the
+   *  route has neither tools.ts nor tools.host.ts. Sorted worker-first for
+   *  stable codegen output. */
+  tools: ToolsEntry[];
   /** Name of the class this agent extends, as written in the source. We use
    *  this to detect McpAgent subclasses and route them differently — the
    *  Agents SDK provides a `.serve()` static for MCP that handles the MCP
@@ -139,7 +177,19 @@ export type Manifest = {
   features: FeatureFlags;
   /** Root-level home UI, or null when there's no agent/app.tsx */
   rootApp?: RootApp | null;
+  /** Absolute path to an optional root-level `cli.ts`, or null.
+   *
+   *  When present, `ayjnt run` (and a compiled binary) boots the worker under
+   *  a local workerd and then invokes this file's default export in the
+   *  foreground. When it returns, everything shuts down — including workerd.
+   *  Never bundled into the worker: it runs in Bun, not in the Workers
+   *  runtime. */
+  cliFile?: string | null;
 };
+
+/** Marker a `tools.host.ts` can include to say "omit me from a deploy rather
+ *  than blocking it". Recognized anywhere in the file's leading comments. */
+export const HOST_TOOLS_OPTIONAL_MARKER = "@ayjnt-optional-on-deploy";
 
 /** Committed to git at .ayjnt/migrations.json. Source of truth for what is in prod. */
 export type MigrationLockfile = {

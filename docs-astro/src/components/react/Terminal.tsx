@@ -7,6 +7,10 @@ export type TerminalLine =
 	| { kind: "command"; prompt?: string; text: string }
 	| { kind: "output"; text: string }
 	| { kind: "success"; text: string }
+	// A failure the reader is meant to notice. Several walkthroughs demonstrate
+	// a command being *refused* on purpose — a blocked deploy, a host tool
+	// denied by policy — and those read as ordinary output without this.
+	| { kind: "error"; text: string }
 	| { kind: "blank" };
 
 type Props = {
@@ -130,6 +134,14 @@ function Line({ line, typed }: { line: TerminalLine; typed: string }) {
 		case "success":
 			return (
 				<div className="whitespace-pre-wrap break-words text-[color:var(--amber)]">
+					{typed}
+				</div>
+			);
+		case "error":
+			// Same red as Callout's `danger` border, so a refused command in a
+			// terminal and a warning in prose read as the same severity.
+			return (
+				<div className="whitespace-pre-wrap break-words text-[#c0392b]">
 					{typed}
 				</div>
 			);

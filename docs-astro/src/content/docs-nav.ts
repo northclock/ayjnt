@@ -55,6 +55,12 @@ export const DOCS_SECTIONS: DocsSection[] = [
 					"agent.ts, middleware.ts, app.tsx, route groups, nested folders — the tree is the config.",
 			},
 			{
+				slug: "guides/cli-file",
+				title: "The cli.ts file",
+				blurb:
+					"An optional root-level cli.ts makes the project a runnable program — in-process Durable Object RPC from Bun, agents still in workerd.",
+			},
+			{
 				slug: "guides/state",
 				title: "Agent state",
 				blurb:
@@ -115,6 +121,12 @@ export const DOCS_SECTIONS: DocsSection[] = [
 					"Zero-config browserTools(this) from ayjnt/browser — wires BROWSER, LOADER, AI, and nodejs_compat in one go.",
 			},
 			{
+				slug: "guides/agent-tools",
+				title: "Agent tools",
+				blurb:
+					"Per-route tool collections a model can call: tools.ts runs in workerd, tools.host.ts runs on the Bun host, both merge into one ToolSet.",
+			},
+			{
 				slug: "guides/email",
 				title: "Email",
 				blurb:
@@ -143,6 +155,12 @@ export const DOCS_SECTIONS: DocsSection[] = [
 				title: "Deployment",
 				blurb:
 					"ayjnt deploy, git preflight checks, wrangler passthrough, environments, secrets.",
+			},
+			{
+				slug: "guides/compile",
+				title: "Compiling to an executable",
+				blurb:
+					"ayjnt compile packs agents, UIs, cli.ts, host tools, Bun and workerd into one ~170MB file that needs nothing installed.",
 			},
 		],
 	},

@@ -32,7 +32,8 @@ agents/ ────────────► Manifest
 
 | File | Role |
 |---|---|
-| [`scan.ts`](./scan.ts) | Walk `agents/**/agent.ts`, extract class/agentId, compute routes/bindings/middleware chains, detect `app.tsx` siblings. Produces `Manifest`. |
+| [`scan.ts`](./scan.ts) | Walk `agents/**/agent.ts`, extract class/agentId, compute routes/bindings/middleware chains, detect `app.tsx` / `tools.ts` / `tools.host.ts` siblings and a root `cli.ts`. Produces `Manifest`. |
+| [`cli.ts`](./cli.ts) | Emit `@ayjnt/cli` — the route-nested, camelized `agents` / `workflows` accessor types for a root-level `cli.ts`. Types only; the runtime objects are built by `../cli/host.ts` from the same manifest. Pure. |
 | [`migrations.ts`](./migrations.ts) | Read/write `.ayjnt/migrations.json`. `diffMigrations` + `applyDiff` + `nextTag` + `formatDiff`. |
 | [`wrangler.ts`](./wrangler.ts) | Emit the generated `wrangler.jsonc` string. Pure. |
 | [`entry.ts`](./entry.ts) | Emit the generated worker entrypoint string (routes, middleware dispatch, HTML-vs-agent disambiguation). Pure. |
@@ -97,8 +98,15 @@ Beyond the worker bundle, codegen also produces files user code imports from:
 ├── tsconfig.json               ← path aliases (@ayjnt/*, @ayjnt/env)
 ├── env.d.ts                    ← GeneratedEnv type with every DO binding
 └── client/
+    ├── cli.ts                  ← @ayjnt/cli — typed context for a root cli.ts
     └── <route>/index.tsx       ← typed useAgent hook per agent
 ```
+
+`client/cli.ts` is emitted unconditionally, even without a root `cli.ts` — the
+types are useful while authoring one, and a types-only module costs nothing.
+Because `@ayjnt/cli` resolves to `client/cli.ts`, which TypeScript prefers over
+`client/cli/index.tsx`, an agent at `agents/cli/` would shadow it; `scan`-time
+validation rejects that route name (see `assertNoReservedClientRoutes`).
 
 User code imports via the `@ayjnt/*` alias defined in the generated tsconfig. The alias maps `@ayjnt/chat` → `.ayjnt/client/chat/index.tsx`. Users either `extends` the generated tsconfig or inline the paths (see main README).
 

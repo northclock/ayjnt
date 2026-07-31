@@ -1,6 +1,14 @@
 # examples
 
-Reference projects that exercise the framework end-to-end. Each is a standalone Bun project with `ayjnt` linked via `file:../..`, so local changes to the framework are immediately reflected.
+Reference projects that exercise the framework end-to-end. Each is a standalone Bun project.
+
+**Linking the framework.** Current Bun *copies* a `file:` dependency rather than symlinking it, so `"ayjnt": "file:../.."` gives you this checkout's code at install time but **not** live afterwards — re-run `bun install --force` after editing framework source. Examples also invoke the CLI through `node_modules/.bin/ayjnt`, which resolves to the built `dist/ayjnt.js`, so changes under `src/cli/` or `src/codegen/` need a `bun run build` in the repo root first.
+
+For an iteration loop without either of those steps, use the sandbox instead — it symlinks the framework and points the project's scripts at `bin/ayjnt.ts` directly:
+
+```sh
+bun run dev:temp --cli    # add --empty for the minimal template
+```
 
 Every example assumes you start from the bare scaffold:
 
@@ -29,6 +37,7 @@ You then delete the starter agent (`agents/alive`, or `agents/counter` + `agents
 | [`space-game`](./space-game) | v0.4 | Multiplayer asteroid shooter. 30Hz physics loop on a DO, authoritative server + dumb clients, canvas render. |
 | [`chess`](./chess) | v0.4 | Two-player chess with server-side move validation + turn enforcement. Spectators welcome. |
 | [`mission-control`](./mission-control) | v0.4 | Four-agent collaborative system. Commander orchestrates navigator / scout / engineer via typed RPC every 2s; each crew role has its own UI. |
+| [`compiled-cli`](./compiled-cli) | v0.6 | `cli.ts`, `tools.ts` (workerd) and `tools.host.ts` (Bun host) in one project, shipped as a single executable with `ayjnt compile`. Covers in-process agent RPC, host-tool side-effect gating, and path confinement. |
 
 ## Running an example
 

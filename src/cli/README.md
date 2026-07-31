@@ -6,12 +6,35 @@ Each file here implements one user-facing command. `index.ts` is the router. Thi
 
 | File | Command | What it does |
 |---|---|---|
-| [`build.ts`](./build.ts) | `ayjnt build` | The codegen pipeline. Also exports `runBuild()` used by dev/deploy. |
+| [`build.ts`](./build.ts) | `ayjnt build` | The codegen pipeline. Also exports `runBuild()` used by dev/run/deploy/compile. |
 | [`dev.ts`](./dev.ts) | `ayjnt dev` | `runBuild` + spawns `wrangler dev`. |
-| [`deploy.ts`](./deploy.ts) | `ayjnt deploy` | Git-safety checks + `runBuild({writeLockfile: false})` + spawns `wrangler deploy`. |
+| [`run.ts`](./run.ts) | `ayjnt run` | `runBuild` + `bundleWorker` + `startHost` + invokes `cli.ts`. Exports `runApp()`, shared verbatim with compiled binaries. |
+| [`compile.ts`](./compile.ts) | `ayjnt compile` | Generates a bootstrap module and hands it to `Bun.build({ compile })`. |
+| [`deploy.ts`](./deploy.ts) | `ayjnt deploy` | Git-safety checks + host-tool refusal + `runBuild({writeLockfile: false})` + spawns `wrangler deploy`. |
 | [`migrate.ts`](./migrate.ts) | `ayjnt migrate` | Dry-run diff. Doesn't write, doesn't deploy. |
+| [`host.ts`](./host.ts) | — | The local runtime. Translates the generated wrangler config into Miniflare options and builds the `cli.ts` context. |
+| [`hostTools.ts`](./hostTools.ts) | — | Loads `tools.host.ts` modules, derives their JSON Schemas, and gates execution by declared side effects. |
+| [`bundle.ts`](./bundle.ts) | — | Shells out to `wrangler deploy --dry-run --outdir` for a workerd-ready bundle. |
 | [`util.ts`](./util.ts) | — | Shared arg parser and wrangler spawner. |
 | [`index.ts`](./index.ts) | — | Command dispatch. |
+
+## Two families of command
+
+`dev`, `build`, `deploy` and `migrate` are thin: they parse args, call `runBuild`,
+and shell out to wrangler. That's the original design and it still holds.
+
+`run` and `compile` are different in kind, because they own a runtime instead of
+delegating to one. Both funnel through `runApp()` in [`run.ts`](./run.ts), which
+is the invariant worth protecting: **a compiled binary and `ayjnt run` execute
+the same function.** Compile changes only where the inputs come from — embedded
+in the executable rather than read off disk. Let those diverge and `cli.ts`
+starts behaving differently depending on how it was launched, which is exactly
+the bug `ayjnt run` exists to prevent.
+
+Note that these two do NOT use `runWrangler` from [`util.ts`](./util.ts). A
+compiled binary has no `bunx`, no `node_modules` and no wrangler, so the runtime
+path cannot depend on shelling out. Wrangler is used at *build* time only, by
+[`bundle.ts`](./bundle.ts).
 
 ## Arg forwarding
 
