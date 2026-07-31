@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-07-31T02:18:53.796Z",
+      "new_sqlite_classes": [
+        "CodeAgent",
+        "SessionsAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "ayjnt-code": {
+      "agentId": "ayjnt-code",
+      "className": "CodeAgent",
+      "firstTag": "v1"
+    },
+    "sessions": {
+      "agentId": "sessions",
+      "className": "SessionsAgent",
+      "firstTag": "v1"
+    }
+  }
+}

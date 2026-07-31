@@ -1,0 +1,63 @@
+<div class="architecture architecture-desktop" aria-label="Ayjnt runtime architecture">
+  <div class="human-node">
+    <span class="node-kicker">Human</span>
+    <strong>You choose the interface</strong>
+    <div class="surface-row">
+      <span><code>app.tsx</code> browser</span>
+      <span><code>cli.ts</code> terminal</span>
+    </div>
+  </div>
+  <div class="architecture-rail" aria-hidden="true"><span>requests</span><i></i></div>
+  <div class="runtime-grid">
+    <article class="runtime-card agent-runtime">
+      <div class="runtime-number">01</div>
+      <span class="node-kicker">Agent runtime</span>
+      <h3>Safe, stateful, instant.</h3>
+      <p>Agents run in workerd V8 isolates, with durable state, scheduling, workflows, and agent-to-agent RPC.</p>
+      <div class="runtime-tags"><span>workerd</span><span>isolate</span><span>deployable</span></div>
+    </article>
+    <div class="bridge">
+      <span>typed bridge</span>
+      <i></i>
+      <small>tools cross with explicit permissions</small>
+    </div>
+    <article class="runtime-card host-runtime">
+      <div class="runtime-number">02</div>
+      <span class="node-kicker">Host runtime</span>
+      <h3>Close to the machine.</h3>
+      <p>Host actions run in Bun, where agents can work with files, shells, databases, processes, and local connectors.</p>
+      <div class="runtime-tags"><span>Bun</span><span>local</span><span>permissioned</span></div>
+    </article>
+  </div>
+</div>
+
+<div class="architecture architecture-mobile" aria-label="Ayjnt runtime architecture, mobile view">
+  <div class="mobile-human-node">
+    <span class="node-kicker">Human</span>
+    <strong>You choose the interface</strong>
+    <div class="surface-row">
+      <span><code>app.tsx</code> browser</span>
+      <span><code>cli.ts</code> terminal</span>
+    </div>
+  </div>
+  <div class="mobile-flow"><i></i><span>requests</span><i></i></div>
+  <article class="mobile-runtime agent-runtime">
+    <div class="runtime-number">01</div>
+    <span class="node-kicker">Agent runtime · workerd</span>
+    <h3>Safe, stateful, instant.</h3>
+    <p>Agents reason in isolated V8 environments with durable state, scheduling, workflows, and agent-to-agent RPC.</p>
+    <div class="runtime-tags"><span>isolate</span><span>deployable</span></div>
+  </article>
+  <div class="mobile-bridge">
+    <i></i>
+    <div><strong>typed bridge</strong><span>tools cross with explicit permissions</span></div>
+    <i></i>
+  </div>
+  <article class="mobile-runtime host-runtime">
+    <div class="runtime-number">02</div>
+    <span class="node-kicker">Host runtime · Bun</span>
+    <h3>Close to the machine.</h3>
+    <p>Host actions work with files, shells, databases, processes, and local connectors.</p>
+    <div class="runtime-tags"><span>local</span><span>permissioned</span></div>
+  </article>
+</div>

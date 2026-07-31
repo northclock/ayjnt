@@ -25,7 +25,7 @@
 //
 //   import { browserTools } from "ayjnt/browser";
 //
-//   class ResearchAgent extends Agent<GeneratedEnv, State> {
+//   class ResearchAgent extends Agent<State> {
 //     async onChatMessage() {
 //       const tools = browserTools(this);
 //       const result = await generateText({ model, tools, messages });

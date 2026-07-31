@@ -413,8 +413,7 @@ plain markdown — edit or delete any that don't fit your house style.
  * from this (`ayjnt new --empty`) and replace agents/alive with their own.
  */
 function blankAgent(): string {
-  return `import { Agent } from "agents";
-import type { GeneratedEnv } from "@ayjnt/env";
+  return `import { Agent } from "ayjnt";
 
 /**
  * Bare starter agent. Responds with "I'm alive" to any request on any
@@ -424,7 +423,7 @@ import type { GeneratedEnv } from "@ayjnt/env";
  * with isolated state. For now that state is empty — delete this agent and
  * drop your own under agents/ when you're ready.
  */
-export default class AliveAgent extends Agent<GeneratedEnv> {
+export default class AliveAgent extends Agent {
   override async onRequest(_request: Request): Promise<Response> {
     return Response.json({
       status: "alive",
@@ -437,12 +436,11 @@ export default class AliveAgent extends Agent<GeneratedEnv> {
 }
 
 function counterAgent(): string {
-  return `import { Agent } from "agents";
-import type { GeneratedEnv } from "@ayjnt/env";
+  return `import { Agent } from "ayjnt";
 
 type State = { count: number };
 
-export default class CounterAgent extends Agent<GeneratedEnv, State> {
+export default class CounterAgent extends Agent<State> {
   override initialState: State = { count: 0 };
 
   override async onRequest(): Promise<Response> {

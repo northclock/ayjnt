@@ -144,7 +144,5 @@ and tries your function first.
 
 ## Reference
 
-- [`examples/email-bot`](../../../examples/email-bot) — SupportAgent
-  with postal-mime parsing and replies.
 - [Cloudflare Email Agents docs](https://developers.cloudflare.com/agents/api-reference/email-agents/).
 - [Cloudflare Email Routing setup](https://developers.cloudflare.com/email-routing/).

@@ -1,363 +1,207 @@
 ---
-import { Code2, LayoutGrid } from "lucide-react";
-import { GithubIcon } from "@/components/react/GithubIcon.tsx";
-import { NpmIcon } from "@/components/react/NpmIcon.tsx";
-import BaseLayout from "@/layouts/BaseLayout.astro";
-import Button from "@/components/Button.astro";
-import CodeBlock from "@/components/CodeBlock.astro";
-import { Terminal } from "@/components/react/Terminal.tsx";
-import { FileTree } from "@/components/react/FileTree.tsx";
-import { FeatureContent } from "@/components/react/FeatureContent.tsx";
-import { ExampleCard } from "@/components/react/ExampleCard.tsx";
-import { ArchitectureDiagram } from "@/components/react/ArchitectureDiagram.tsx";
-import BlurText from "@/components/react/BlurText.tsx";
-import { EXAMPLES } from "@/content/examples";
-import { existsSync } from "node:fs";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Architecture from "../components/Architecture.astro";
+import Code from "../components/Code.astro";
+import { examples } from "../content/examples";
 
-const featured = EXAMPLES.filter((e) => e.status === "stable").slice(0, 6);
-
-// The showcase banner renders only once the image is present, so we never
-// ship a broken <img>. (`public/og.jpg` resolves against the project root —
-// astro build's cwd.)
-const hasBanner = existsSync("public/og.jpg");
-
-const interAgentCode = `// agents/orders/agent.ts
-import { Agent } from "agents";
-import { getAgent } from "ayjnt/rpc";
-import type InventoryAgent from "../inventory/agent.ts";
-
-export default class OrdersAgent extends Agent<Env, State> {
-  override async onRequest(request: Request): Promise<Response> {
-    const { sku, qty } = await request.json();
-    const inventory = await getAgent<InventoryAgent>(
-      this.env.INVENTORY_AGENT,
-      "main",
-    );
-    const remaining = await inventory.decrement(sku, qty);
-    return Response.json({ ok: true, remaining });
-  }
-}`;
-
-const quickStartBullets = [
-	"New project with a UI by default (--empty for none)",
-	"Generated wrangler config, migrations, and entry point",
-	"HMR-backed dev server that rebuilds on file-tree changes",
-];
-
-const quickStartTerminal = [
-	{ kind: "command" as const, text: "bunx ayjnt new my-agent-app" },
-	{ kind: "output" as const, text: "✓ scaffolded my-agent-app/ (ui)" },
-	{ kind: "blank" as const },
-	{ kind: "command" as const, text: "cd my-agent-app && bun install" },
-	{ kind: "output" as const, text: "✓ 237 packages installed [3.2s]" },
-	{ kind: "blank" as const },
-	{ kind: "command" as const, text: "bun run dev" },
-	{ kind: "success" as const, text: "✓ ayjnt: 1 agent(s) → .ayjnt/dist/wrangler.jsonc" },
-	{ kind: "output" as const, text: "⎔ Listening on http://localhost:8787" },
-];
-
-const fileTreeRoot = [
-	{
-		type: "folder" as const,
-		name: "agents",
-		defaultOpen: true,
-		children: [
-			{
-				type: "folder" as const,
-				name: "chat",
-				defaultOpen: true,
-				children: [
-					{ type: "file" as const, name: "agent.ts", kind: "ts" as const, note: "state + @callable" },
-					{ type: "file" as const, name: "app.tsx", kind: "tsx" as const, note: "React UI" },
-					{ type: "file" as const, name: "docs.md", kind: "md" as const, note: "served at /chat/docs" },
-				],
-			},
-			{
-				type: "folder" as const,
-				name: "admin",
-				defaultOpen: true,
-				children: [
-					{ type: "file" as const, name: "middleware.ts", kind: "ts" as const, note: "auth" },
-					{
-						type: "folder" as const,
-						name: "users",
-						defaultOpen: true,
-						children: [{ type: "file" as const, name: "agent.ts", kind: "ts" as const }],
-					},
-				],
-			},
-			{
-				type: "folder" as const,
-				name: "(public)",
-				defaultOpen: true,
-				note: "route group",
-				children: [
-					{
-						type: "folder" as const,
-						name: "status",
-						defaultOpen: true,
-						children: [{ type: "file" as const, name: "agent.ts", kind: "ts" as const }],
-					},
-				],
-			},
-		],
-	},
-];
-
-const interAgentFacts: Array<[string, string]> = [
-	["native Workers RPC", "no HTTP, no JSON round-trip"],
-	["method autocomplete", "from the target class"],
-	["exceptions propagate", "throw in callee, catch in caller"],
-];
+const quickstart = `bunx ayjnt new my-agent
+cd my-agent
+bun install
+bun run dev`;
 ---
+
 <BaseLayout>
-	<div>
-		<!-- Hero -->
-		<section class="relative isolate overflow-hidden border-b border-[var(--ink)]">
-			<div class="grid-paper absolute inset-0 opacity-60"></div>
-			<div class="relative mx-auto max-w-6xl px-6 pt-20 pb-24 md:pt-28 md:pb-32">
-				<span class="tag mb-5">v0.5 · for Cloudflare Agents</span>
-				<h1 class="text-balance font-sans text-5xl font-semibold leading-[1.05] tracking-tight md:text-7xl">
-					Write the agent.
-					<br />
-					<span class="relative inline-block">
-						/AYjnt/ writes
-						<span aria-hidden="true" class="absolute inset-x-0 -bottom-1 h-3 bg-[var(--amber-glow)]"></span>
-					</span>{" "}
-					everything else.
-				</h1>
-				<p class="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--ink-soft)] md:text-xl">
-					Agent-first framework for Cloudflare. File-based routing,
-					auto-generated wrangler config, typed inter-agent RPC, co-located
-					React UIs, and MCP support — so you can ship Durable Object agents
-					without ever opening <code class="font-mono">wrangler.jsonc</code>.
-				</p>
-				<div class="mt-8 flex flex-wrap items-center gap-3">
-					<Button href="/docs" variant="primary">
-						<Code2 className="h-4 w-4" /> Read the docs
-					</Button>
-					<Button href="/examples" variant="secondary">
-						<LayoutGrid className="h-4 w-4" /> Browse examples
-					</Button>
-					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
-						<GithubIcon className="h-4 w-4" /> GitHub
-					</Button>
-				</div>
-			</div>
-		</section>
+  <section class="hero">
+    <div class="hero-copy">
+      <div class="human-note"><span aria-hidden="true"><i></i><i></i></span> Designed for people in the loop</div>
+      <h1>Build agents<br />people can <em>work with.</em></h1>
+      <p class="hero-lede">
+        Ayjnt is an agent harness framework for building capable agents with a
+        browser interface, a terminal interface, and a safe path to the host.
+      </p>
+      <div class="hero-actions">
+        <a class="button primary" href="/docs/getting-started/">Start building <span>→</span></a>
+        <a class="button secondary" href="https://github.com/northclock/ayjnt">View on GitHub <span>↗</span></a>
+      </div>
+      <div class="install-command" data-install>
+        <code>bunx ayjnt new my-agent</code>
+        <button type="button" aria-label="Copy install command">copy</button>
+      </div>
+    </div>
+    <div class="hero-visual" aria-label="A human interacting with an agent">
+      <div class="orbit orbit-one"></div>
+      <div class="orbit orbit-two"></div>
+      <div class="interface-card browser-card">
+        <span class="interface-label">browser</span>
+        <div class="browser-top"><i></i><i></i><i></i><small>localhost:8787/code/demo</small></div>
+        <div class="browser-body">
+          <span class="activity-dot"></span>
+          <div><b>Agent is working</b><small>Reading src/runtime/tools.ts</small></div>
+        </div>
+      </div>
+      <div class="mascot-stage">
+        <div class="mascot-bubble">ready when you are</div>
+        <img src="/mascot.svg" alt="Ayjnt mascot" />
+      </div>
+      <div class="interface-card terminal-card">
+        <span class="interface-label">terminal</span>
+        <code><i>›</i> fix the failing bridge test</code>
+        <code class="terminal-response"><span>✓</span> 3 files updated</code>
+      </div>
+      <div class="human-chip"><span>you</span><i></i></div>
+    </div>
+  </section>
 
-		<!-- Showcase banner (renders only when public/og.jpg exists) -->
-		{hasBanner && (
-			<section class="relative border-b border-[var(--ink)]">
-				<img
-					src="/og.jpg"
-					alt="A pixel-art agent control room: many small mascot agents coordinated by one larger one, screens showing swarm logic and active agent IDs."
-					loading="lazy"
-					class="block w-full max-h-[70vh] min-h-[260px] object-cover"
-				/>
-				<!-- centered scrim keeps the caption legible over the busy art -->
-				<div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_rgba(0,0,0,0.62),_rgba(0,0,0,0.22)_55%,_transparent_80%)]">
-					<BlurText
-						client:visible
-						text="One harness, many agents."
-						animateBy="words"
-						direction="top"
-						className="justify-center px-6 text-center font-sans text-3xl font-semibold tracking-tight text-white md:text-5xl [text-shadow:0_2px_12px_rgba(0,0,0,0.85)]"
-					/>
-				</div>
-			</section>
-		)}
+  <section class="trust-strip" aria-label="Runtime foundations">
+    <span>Powered by</span>
+    <strong><i class="bun-dot"></i>Bun</strong>
+    <strong><i class="workerd-dot"></i>workerd</strong>
+    <span class="trust-copy">local by default · cloud when you want it</span>
+  </section>
 
-		<!-- Quick start -->
-		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
-			<div class="mx-auto grid grid-cols-1 max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-				<div>
-					<h2 class="section-title">Quick start</h2>
-					<p class="mt-4 max-w-lg text-lg leading-relaxed text-[var(--ink-soft)]">
-						One command scaffolds a project with a working agent. A second
-						command starts a local Cloudflare worker you can hit from curl or
-						the Agents client SDK.
-					</p>
-					<ul class="mt-6 space-y-3 text-sm">
-						{quickStartBullets.map((item) => (
-							<li class="flex items-start gap-2">
-								<span class="mt-2 inline-block h-1.5 w-1.5 bg-[var(--amber)]" aria-hidden="true"></span>
-								<span class="text-[var(--ink-soft)]">{item}</span>
-							</li>
-						))}
-					</ul>
-				</div>
-				<Terminal client:visible title="terminal — zsh" lines={quickStartTerminal} />
-			</div>
-		</section>
+  <section class="section harness-section">
+    <div class="section-intro split-intro">
+      <div>
+        <span class="eyebrow">Why a harness?</span>
+        <h2>Intelligence is only<br />part of the system.</h2>
+      </div>
+      <p>
+        A model can reason. A harness makes that reasoning useful: it gives the
+        agent tools, context, memory, boundaries, observability, and a place for
+        people to step in.
+      </p>
+    </div>
+    <div class="harness-grid">
+      <article>
+        <span class="feature-index">01</span>
+        <div class="feature-glyph context-glyph"><i></i><i></i><i></i></div>
+        <h3>Give it context</h3>
+        <p>State, history, files, and the right information at the right moment.</p>
+      </article>
+      <article>
+        <span class="feature-index">02</span>
+        <div class="feature-glyph tool-glyph"><i></i><i></i></div>
+        <h3>Give it capabilities</h3>
+        <p>Tools that run near the agent or cross the bridge to the host.</p>
+      </article>
+      <article>
+        <span class="feature-index">03</span>
+        <div class="feature-glyph boundary-glyph"><i></i><i></i></div>
+        <h3>Give it boundaries</h3>
+        <p>Isolation, explicit permissions, and human approval for meaningful actions.</p>
+      </article>
+      <article>
+        <span class="feature-index">04</span>
+        <div class="feature-glyph human-glyph"><i></i><i></i><i></i></div>
+        <h3>Keep people present</h3>
+        <p>A useful interface for directing, inspecting, and collaborating with the agent.</p>
+      </article>
+    </div>
+    <a class="text-link" href="/docs/harness-engineering/">Learn about harness engineering <span>→</span></a>
+  </section>
 
-		<!-- File tree showcase -->
-		<section class="border-b border-[var(--ink)]">
-			<div class="mx-auto grid grid-cols-1 max-w-6xl items-start gap-10 px-6 py-20 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-				<FileTree client:visible title="agents/ — the whole API" root={fileTreeRoot} />
-				<div>
-					<h2 class="section-title">The folder is the framework</h2>
-					<p class="mt-4 text-lg leading-relaxed text-[var(--ink-soft)]">
-						The shape you draft in <code class="font-mono">agents/</code>{" "}
-						maps 1:1 to URLs, DO bindings, migrations, and the worker
-						entrypoint. There is no config file to author — just files and
-						folders.
-					</p>
-					<dl class="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2">
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">agent.ts</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								One default-exported class per folder. Name + state + methods.
-							</dd>
-						</div>
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">middleware.ts</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								Applies to descendant agents. Root → leaf chaining, Hono-style{" "}
-								<code class="font-mono">next()</code>.
-							</dd>
-						</div>
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">app.tsx</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								Optional React UI. Gets a typed{" "}
-								<code class="font-mono">useAgent()</code> bound to this folder.
-							</dd>
-						</div>
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">docs.md</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								Optional markdown. Embedded into the worker, served at{" "}
-								<code class="font-mono">/&lt;route&gt;/docs</code> through
-								the same middleware chain that gates the agent.
-							</dd>
-						</div>
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">(parens)</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								Route groups — share middleware without nesting the URL.
-							</dd>
-						</div>
-						<div>
-							<dt class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">/__ayjnt/catalog</dt>
-							<dd class="mt-1 text-sm text-[var(--ink-soft)]">
-								Built-in JSON endpoint. Lists every agent the caller can
-								reach with its <code class="font-mono">@callable</code>{" "}
-								methods — filtered by middleware on every request.
-							</dd>
-						</div>
-					</dl>
-				</div>
-			</div>
-		</section>
+  <section class="section architecture-section" id="architecture">
+    <div class="section-intro">
+      <span class="eyebrow">Architecture</span>
+      <h2>The right runtime<br />for each kind of work.</h2>
+      <p>Isolation where agents reason. Native capability where work touches the machine. A typed, permission-aware bridge between them.</p>
+    </div>
+    <Architecture />
+  </section>
 
-		<!-- Features -->
-		<section class="border-b border-[var(--ink)] bg-[var(--paper)]">
-			<div class="mx-auto max-w-6xl px-6 py-20">
-				<header class="mb-10 max-w-2xl">
-					<h2 class="section-title">What you get</h2>
-					<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
-						Six tools-in-one: routing, migrations, RPC, UI, MCP, dev loop.
-						None of the glue.{" "}
-						<span class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
-							click any card for a visual deep-dive
-						</span>
-					</p>
-				</header>
-				<FeatureContent client:visible />
-			</div>
-		</section>
+  <section class="section interfaces-section">
+    <div class="section-intro split-intro">
+      <div>
+        <span class="eyebrow">Human interfaces</span>
+        <h2>Every agent gets<br />a front door.</h2>
+      </div>
+      <p>
+        The interface lives beside the agent, not in a separate product. Create
+        the surface that fits the moment—or provide both.
+      </p>
+    </div>
+    <div class="interface-showcase">
+      <article class="showcase-card browser-showcase">
+        <div class="showcase-head">
+          <div><span>Browser</span><code>app.tsx</code></div>
+          <p>Typed, realtime React UI co-located with the agent it controls.</p>
+        </div>
+        <div class="session-ui">
+          <aside>
+            <b>Sessions</b>
+            <span class="selected"><i></i> bridge tests <small>now</small></span>
+            <span><i></i> docs cleanup <small>12m</small></span>
+            <span><i></i> auth refactor <small>1h</small></span>
+          </aside>
+          <div class="session-main">
+            <div class="session-title"><span>bridge tests</span><small>2,814 tokens</small></div>
+            <p class="user-message">Find the race in the host bridge and fix it.</p>
+            <div class="agent-message"><span>AY</span><p>I found a pending request that can outlive its connection. I’m adding cancellation and a regression test.</p></div>
+            <div class="tool-call"><span>✓</span><code>edit src/core/hostBridge.ts</code></div>
+          </div>
+        </div>
+      </article>
+      <article class="showcase-card cli-showcase">
+        <div class="showcase-head">
+          <div><span>Terminal</span><code>cli.ts</code></div>
+          <p>Full-screen, scriptable, and close to the files and tools developers already use.</p>
+        </div>
+        <div class="terminal-ui">
+          <div class="terminal-title"><i></i><span>ayjnt-code</span><small>~/projects/ayjnt</small></div>
+          <div class="terminal-lines">
+            <p><span>you</span> clean up the docs and examples</p>
+            <p><span>agent</span> I’ll inventory the current site first.</p>
+            <p class="terminal-tool"><b>●</b> Search <code>examples/**</code> <small>24 results</small></p>
+            <p class="terminal-tool"><b>●</b> Read <code>docs-astro/src/pages/index.astro</code></p>
+            <p><span>agent</span> There are three overlapping scheduling examples. I’ll consolidate them into one practical brief agent.</p>
+            <p class="prompt-line"><i>›</i><span></span></p>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
 
-		<!-- Inter-agent RPC -->
-		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
-			<div class="mx-auto grid grid-cols-1 max-w-6xl items-center gap-10 px-6 py-20 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-				<div>
-					<h2 class="section-title">Agents that call each other, typed.</h2>
-					<p class="mt-4 text-lg leading-relaxed text-[var(--ink-soft)]">
-						<code class="font-mono">getAgent&lt;T&gt;</code> returns a
-						typed DurableObject stub. Method autocomplete from the target
-						class. Errors propagate across the RPC boundary as exceptions.
-						Rename a method and both sides break at compile time.
-					</p>
-					<ul class="mt-6 space-y-3 text-sm">
-						{interAgentFacts.map(([k, v]) => (
-							<li class="flex items-baseline gap-3">
-								<span class="font-mono text-xs uppercase tracking-widest text-[var(--amber)]">
-									{k}
-								</span>
-								<span class="text-[var(--ink-soft)]">→ {v}</span>
-							</li>
-						))}
-					</ul>
-				</div>
-				<CodeBlock
-					filename="agents/orders/agent.ts"
-					lang="ts"
-					code={interAgentCode}
-					highlightLines={[3, 9, 10, 11, 12]}
-				/>
-			</div>
-		</section>
+  <section class="section examples-section">
+    <div class="section-intro split-intro">
+      <div>
+        <span class="eyebrow">Examples</span>
+        <h2>Six real starting points.<br />No catalog filler.</h2>
+      </div>
+      <p>Each example teaches a distinct harness pattern and includes a human interface you can run, inspect, and adapt.</p>
+    </div>
+    <div class="example-grid">
+      {examples.map((example) => (
+        <a class={`example-card accent-${example.accent}`} href={`/examples/${example.slug}/`}>
+          <div class="example-top"><span>{example.index}</span><i>↗</i></div>
+          <div class={`example-art art-${example.slug}`}>
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <h3>{example.title}</h3>
+          <p>{example.description}</p>
+          <div class="tag-row">{example.tags.slice(0, 3).map((tag) => <span>{tag}</span>)}</div>
+        </a>
+      ))}
+    </div>
+    <a class="text-link" href="/examples/">Explore all examples <span>→</span></a>
+  </section>
 
-		<!-- Pipeline / architecture -->
-		<section class="border-b border-[var(--ink)]">
-			<div class="mx-auto max-w-6xl px-6 py-20">
-				<header class="mb-10 max-w-2xl">
-					<h2 class="section-title">Under the hood</h2>
-					<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
-						Every build is a pure function of your file tree. The pipeline is
-						small and inspectable — peek at{" "}
-						<code class="font-mono">.ayjnt/dist/entry.ts</code> any time.
-					</p>
-				</header>
-				<ArchitectureDiagram client:visible />
-			</div>
-		</section>
+  <section class="section quickstart-section">
+    <div class="quickstart-copy">
+      <span class="eyebrow">Start building</span>
+      <h2>From idea to running agent<br />in four commands.</h2>
+      <p>Start locally. Add a browser UI, a terminal UI, or both. Deploy the agent runtime only when you need the cloud.</p>
+      <a class="button light" href="/docs/getting-started/">Read the quickstart <span>→</span></a>
+    </div>
+    <Code title="terminal" code={quickstart} />
+  </section>
 
-		<!-- Featured examples -->
-		<section class="border-b border-[var(--ink)] bg-[var(--paper-edge)]">
-			<div class="mx-auto max-w-6xl px-6 py-20">
-				<header class="mb-10 flex items-end justify-between gap-4">
-					<div class="max-w-2xl">
-						<h2 class="section-title">Build these</h2>
-						<p class="mt-3 text-lg leading-relaxed text-[var(--ink-soft)]">
-							Every example in the gallery has a scaffold command, the code
-							you'd add to which file, an animated terminal walkthrough,
-							and the deploy step.
-						</p>
-					</div>
-					<a href="/examples" class="link-underline hidden shrink-0 font-mono text-sm md:inline">
-						All examples →
-					</a>
-				</header>
-				<div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-					{featured.map((e) => (
-						<ExampleCard client:visible example={e} />
-					))}
-				</div>
-			</div>
-		</section>
-
-		<!-- CTA -->
-		<section class="relative border-b border-[var(--ink)]">
-			<div class="grid-paper-dots absolute inset-0 opacity-50"></div>
-			<div class="relative mx-auto max-w-4xl px-6 py-20 text-center">
-				<h2 class="section-title inline-block">Ready when you are.</h2>
-				<p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-[var(--ink-soft)]">
-					One command scaffolds the project. One command ships it.
-				</p>
-				<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-					<Button href="/docs" variant="primary">
-						<Code2 className="h-4 w-4" /> Start the docs
-					</Button>
-					<Button href="https://www.npmjs.com/package/ayjnt" variant="secondary" external>
-						<NpmIcon className="h-4 w-4" /> ayjnt on npm
-					</Button>
-					<Button href="https://github.com/northclock/ayjnt" variant="ghost" external>
-						<GithubIcon className="h-4 w-4" /> Source on GitHub
-					</Button>
-				</div>
-			</div>
-		</section>
-	</div>
+  <script>
+    const install = document.querySelector<HTMLElement>("[data-install]");
+    const copy = install?.querySelector<HTMLButtonElement>("button");
+    copy?.addEventListener("click", async () => {
+      await navigator.clipboard.writeText("bunx ayjnt new my-agent");
+      copy.textContent = "copied";
+      window.setTimeout(() => (copy.textContent = "copy"), 1200);
+    });
+  </script>
 </BaseLayout>

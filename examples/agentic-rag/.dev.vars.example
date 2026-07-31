@@ -1,7 +1,0 @@
-# Copy this to .dev.vars and fill in the values.
-#
-# Find your account id at https://dash.cloudflare.com — sidebar bottom-left.
-# Create an API token with "Workers AI: Read" permission at
-# https://dash.cloudflare.com/profile/api-tokens
-CF_ACCOUNT_ID=your-account-id
-CF_API_TOKEN=your-token

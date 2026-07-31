@@ -55,7 +55,7 @@ const say = (msg: string) => console.log(`\n${green(`[${++step}]`)} ${msg}`);
  *
  * Kept deliberately small — just enough to prove each mechanism works. For the
  * fuller treatment (side-effect gating, path confinement, a real subcommand
- * parser) see `examples/compiled-cli`.
+ * parser) see `examples/code`.
  */
 async function seedCliFiles(dir: string, isEmpty: boolean): Promise<void> {
   // `ayjnt new --empty` scaffolds agents/alive; the UI template uses counter.

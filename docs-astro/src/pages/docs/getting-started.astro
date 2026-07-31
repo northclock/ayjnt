@@ -1,0 +1,76 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Code from "../../components/Code.astro";
+
+const commands = `bunx ayjnt new my-agent
+cd my-agent
+bun install
+bun run dev`;
+const app = `// agents/counter/app.tsx
+import { useAgent } from "@ayjnt/counter";
+
+export default function Counter() {
+  const agent = useAgent();
+  return (
+    <button onClick={() => agent.call("increment", [1])}>
+      Count: {agent.state?.count ?? 0}
+    </button>
+  );
+}`;
+const cli = `// cli.ts
+import type { AyjntCli } from "@ayjnt/cli";
+
+export default async function ({ agents }: AyjntCli) {
+  const counter = agents.counter("demo");
+  console.log(await counter.increment(1));
+}`;
+---
+
+<DocsLayout
+  title="Getting started"
+  description="Create a local Ayjnt project, run your first agent, and meet its browser and terminal interfaces."
+  eyebrow="Start here"
+>
+  <h2 id="requirements">Before you start</h2>
+  <p>
+    Install <a href="https://bun.sh">Bun</a> 1.1 or newer. Ayjnt uses Bun for
+    its CLI, host runtime, package management, and compiled executables.
+  </p>
+
+  <h2 id="create">Create the project</h2>
+  <Code title="terminal" code={commands} />
+  <p>
+    Open <code>http://localhost:8787</code>. The starter includes a stateful
+    counter and a small browser interface. Changes to agent code and UI code
+    are picked up while the development server runs.
+  </p>
+
+  <h2 id="browser-interface">Add a browser interface</h2>
+  <p>
+    Put <code>app.tsx</code> beside an agent. Ayjnt generates a typed
+    <code>useAgent()</code> hook for that route and serves the interface at the
+    same URL as the agent instance.
+  </p>
+  <Code title="agents/counter/app.tsx" code={app} />
+  <p>
+    Visit <code>/counter/demo</code>. The final segment names the instance, so
+    <code>/counter/alice</code> is a separate stateful agent.
+  </p>
+
+  <h2 id="terminal-interface">Add a terminal interface</h2>
+  <p>
+    A root <code>cli.ts</code> is the foreground program for local and compiled
+    harnesses. It runs in Bun and receives typed handles to every agent.
+  </p>
+  <Code title="cli.ts" code={cli} />
+  <p>Run it with <code>bunx ayjnt run</code>. When the function returns, the local runtime shuts down cleanly.</p>
+
+  <h2 id="next">Choose the next capability</h2>
+  <ul>
+    <li>Use <code>tools.ts</code> for tools that should run with the agent.</li>
+    <li>Use <code>tools.host.ts</code> for explicit access to files, shells, SQLite, and other Bun APIs.</li>
+    <li>Use <code>workflow.ts</code> for durable, multi-step jobs.</li>
+    <li>Use scheduling methods when an agent should wake itself later.</li>
+  </ul>
+  <p>See the <a href="/examples/">curated examples</a> for complete applications of each pattern.</p>
+</DocsLayout>

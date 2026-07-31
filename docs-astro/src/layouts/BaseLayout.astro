@@ -2,70 +2,49 @@
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
-import "@fontsource/geist-sans/700.css";
 import "@fontsource/geist-mono/400.css";
-import "@fontsource/geist-mono/500.css";
-import "@fontsource/geist-mono/600.css";
-import "@/styles/globals.css";
-import Nav from "@/components/Nav.astro";
-import Footer from "@/components/Footer.astro";
+import "../styles/global.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
 
-type Props = {
-	title?: string;
-	description?: string;
-	ogTitle?: string;
-	ogDescription?: string;
-	/** Path (or absolute URL) of the social-share image. Resolved to an
-	 *  absolute URL against `site` — scrapers reject relative og:image. */
-	ogImage?: string;
-};
+interface Props {
+  title?: string;
+  description?: string;
+}
 
 const {
-	title = "ayjnt — Agent-first framework for Cloudflare",
-	description = "File-based routing, auto-generated wrangler config, typed inter-agent RPC, co-located React UIs, and MCP support. No worker boilerplate, no wrangler wrestling.",
-	ogTitle = "ayjnt — Agent-first framework for Cloudflare",
-	ogDescription = "File-based routing for Cloudflare Agents. Write the agent, the framework writes everything else.",
-	ogImage = "/og.jpg",
+  title = "Ayjnt — The human-first agent harness",
+  description = "Build, run, and interact with capable agents across the browser and terminal.",
 } = Astro.props;
-
-// Build ABSOLUTE URLs at build time (scrapers reject relative og:image).
-// `Astro.site` comes from astro.config's `site`; fall back to the current
-// page's origin so a missing `site` still produces a usable absolute URL.
-const siteOrigin = Astro.site ?? new URL(Astro.url.origin);
-const ogImageUrl = new URL(ogImage, siteOrigin).href;
-const canonicalUrl = new URL(Astro.url.pathname, siteOrigin).href;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const socialImage = new URL("/og.png", Astro.site);
 ---
+
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-		<link rel="canonical" href={canonicalUrl} />
-		<title>{title}</title>
-		<meta name="description" content={description} />
-		<meta property="og:title" content={ogTitle} />
-		<meta property="og:description" content={ogDescription} />
-		<meta property="og:type" content="website" />
-		<meta property="og:url" content={canonicalUrl} />
-		<meta property="og:image" content={ogImageUrl} />
-		<meta property="og:image:alt" content={ogTitle} />
-		<meta name="twitter:card" content="summary_large_image" />
-		<meta name="twitter:title" content={ogTitle} />
-		<meta name="twitter:description" content={ogDescription} />
-		<meta name="twitter:image" content={ogImageUrl} />
-		<style is:global>
-			:root {
-				--font-geist-sans: "Geist Sans", system-ui, -apple-system, sans-serif;
-				--font-geist-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
-			}
-		</style>
-	</head>
-	<body class="antialiased relative">
-		<Nav />
-		<main class="relative">
-			<slot />
-		</main>
-		<Footer />
-	</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="theme-color" content="#f4f3ed" />
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={socialImage} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <Header />
+      <main><slot /></main>
+      <Footer />
+    </div>
+  </body>
 </html>

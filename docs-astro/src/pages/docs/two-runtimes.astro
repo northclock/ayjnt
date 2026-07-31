@@ -1,0 +1,55 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Architecture from "../../components/Architecture.astro";
+---
+
+<DocsLayout
+  title="Two runtimes, one harness"
+  description="Ayjnt separates isolated agent execution from host capabilities, then connects them through a typed, permission-aware bridge."
+  eyebrow="Architecture"
+>
+  <Architecture />
+
+  <h2 id="agent-runtime">The agent runtime</h2>
+  <p>
+    Agent classes, durable state, schedules, workflows, and in-runtime tools
+    execute in workerd. Each stateful agent instance is backed by a V8 isolate,
+    providing a lightweight boundary that starts quickly and scales to large
+    numbers of concurrent agents.
+  </p>
+  <p>
+    This side of the harness is portable between local workerd and Cloudflare.
+    It is the right place for coordination, model calls, state machines, and
+    tools that do not need native host access.
+  </p>
+
+  <h2 id="host-runtime">The host runtime</h2>
+  <p>
+    The CLI and host tools execute in Bun. This is where a harness can use
+    <code>Bun.file</code>, <code>Bun.$</code>, <code>bun:sqlite</code>, local
+    processes, and connectors that belong to the machine running the harness.
+  </p>
+  <p>
+    Host tools declare whether they read, write, or execute. Ayjnt can then
+    gate meaningful side effects instead of treating every tool call as equally
+    trusted.
+  </p>
+
+  <h2 id="bridge">The bridge</h2>
+  <p>
+    An agent sees one merged tool set. Workerd-native tools execute beside the
+    agent. Host tools are represented by typed proxies and cross an internal
+    bridge only when called. The host validates the declared permission before
+    running the tool.
+  </p>
+
+  <table>
+    <thead><tr><th>Concern</th><th>Agent runtime</th><th>Host runtime</th></tr></thead>
+    <tbody>
+      <tr><td>Runtime</td><td>workerd / V8 isolates</td><td>Bun</td></tr>
+      <tr><td>Best for</td><td>state, orchestration, model loops</td><td>files, shells, native APIs</td></tr>
+      <tr><td>Tool file</td><td><code>tools.ts</code></td><td><code>tools.host.ts</code></td></tr>
+      <tr><td>Cloud deploy</td><td>Yes</td><td>No host process in cloud deployments</td></tr>
+    </tbody>
+  </table>
+</DocsLayout>

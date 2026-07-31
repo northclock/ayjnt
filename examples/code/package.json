@@ -1,0 +1,26 @@
+{
+  "name": "ayjnt-example-code",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ayjnt dev",
+    "start": "ayjnt run --allow-host-writes --allow-host-exec",
+    "build": "ayjnt build"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.0",
+    "@opentui/core": "^0.2.6",
+    "agents": "0.13.1",
+    "ai": "^6.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "ayjnt": "latest",
+    "wrangler": "4.82.1"
+  }
+}

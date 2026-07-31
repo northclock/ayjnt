@@ -1,10 +1,8 @@
-// Zero-config mixin for co-located workflows.
+// Backward-compatible mixin for co-located workflows.
 //
-// When a `workflow.ts` sits next to an `agent.ts`, the framework already
-// knows which workflow binding belongs to which agent — that pairing is
-// derived at scan time from the folder layout. Passing the binding name
-// as a magic string into `this.runWorkflow("ORDERS_PROCESSING", params)`
-// is redundant once the framework knows about the pairing.
+// New code should extend Ayjnt's `Agent` directly and use its built-in,
+// generated `this.workflow(params)` method. This module remains available
+// so projects created before that API can migrate without a breaking release.
 //
 // `withWorkflow` is the ergonomic shortcut:
 //
@@ -13,7 +11,7 @@
 //   import type OrdersProcessing from "./workflow.ts";
 //
 //   export default class OrdersAgent
-//     extends withWorkflow<typeof OrdersProcessing>()(Agent)<GeneratedEnv, State>
+//     extends withWorkflow<typeof OrdersProcessing>()(Agent)<State>
 //   {
 //     async placeOrder(req: OrderRequest) {
 //       const id = await this.workflow({           // ← typed against
@@ -91,8 +89,7 @@ export interface WorkflowMixinMembers<W> {
 
 /**
  * Return type of {@link withWorkflow}. Intersects the original `TBase`
- * (preserving all generic args like `<Env, State>` so
- * `withWorkflow(Agent)<Env, State>` still type-checks) with a
+ * (preserving its generic args) with a
  * constructor that produces an object with the `workflow` method.
  *
  * Same return-type pattern `@cloudflare/voice`'s `withVoice` uses.
@@ -102,6 +99,9 @@ export type WorkflowMixinReturn<TBase extends Constructor, W> = TBase &
 
 /**
  * Mixin that adds `this.workflow(params)` to an Agent subclass.
+ *
+ * @deprecated Extend `Agent<State>` directly. A co-located `workflow.ts`
+ * automatically supplies the typed `this.workflow(params)` method.
  *
  * @template W - The co-located workflow class (`typeof OrdersProcessing`).
  *               Type-only — `withWorkflow` doesn't need a value reference
@@ -117,7 +117,7 @@ export type WorkflowMixinReturn<TBase extends Constructor, W> = TBase &
  * import type OrdersProcessing from "./workflow.ts";
  *
  * export default class OrdersAgent
- *   extends withWorkflow<typeof OrdersProcessing>()(Agent)<GeneratedEnv, State>
+ *   extends withWorkflow<typeof OrdersProcessing>()(Agent)<State>
  * {
  *   async placeOrder(req: OrderRequest) {
  *     const workflowId = await this.workflow({

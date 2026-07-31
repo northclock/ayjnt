@@ -1,23 +1,21 @@
 {
   "name": "ayjnt-example-chess",
-  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "ayjnt dev",
-    "build": "ayjnt build",
-    "deploy": "ayjnt deploy",
-    "migrate": "ayjnt migrate"
+    "build": "ayjnt build"
   },
   "dependencies": {
-    "agents": "0.10.2",
-    "react": "^19",
-    "react-dom": "^19"
+    "agents": "0.13.1",
+    "chess.js": "^1.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "ayjnt": "latest",
     "wrangler": "4.82.1"
   }

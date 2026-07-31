@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-07-31T02:18:53.798Z",
+      "new_sqlite_classes": [
+        "VoiceAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "voice": {
+      "agentId": "voice",
+      "className": "VoiceAgent",
+      "firstTag": "v1"
+    }
+  }
+}

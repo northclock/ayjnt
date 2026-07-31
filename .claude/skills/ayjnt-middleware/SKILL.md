@@ -173,5 +173,5 @@ concerns (auth) closer to the leaf.
 
 ## Reference
 
-[`examples/middleware`](../../../examples/middleware) — root logger
-+ admin auth gate + route group with no auth. Six files.
+See the generated middleware tests in
+[`src/codegen`](../../../src/codegen) for complete routing cases.

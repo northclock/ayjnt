@@ -1,7 +1,7 @@
 {
   "name": "ayjnt",
-  "version": "0.5.7",
-  "description": "Agent-first framework for Cloudflare. No worker boilerplate, no wrangler wrestling.",
+  "version": "0.5.8",
+  "description": "A human-first agent harness framework powered by Bun and workerd.",
   "type": "module",
   "bin": {
     "ayjnt": "./dist/ayjnt.js"
@@ -49,6 +49,24 @@
       "import": "./dist/workflow.js",
       "default": "./dist/workflow.js"
     },
+    "./workflows": {
+      "bun": "./src/runtime/workflows.ts",
+      "types": "./dist/workflows.d.ts",
+      "import": "./dist/workflows.js",
+      "default": "./dist/workflows.js"
+    },
+    "./client": {
+      "bun": "./src/runtime/client.ts",
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
+    "./session": {
+      "bun": "./src/runtime/session.ts",
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js",
+      "default": "./dist/session.js"
+    },
     "./cli": {
       "bun": "./src/runtime/cliContext.ts",
       "types": "./dist/cliContext.d.ts",
@@ -91,9 +109,11 @@
     "release": "bun publish"
   },
   "keywords": [
-    "cloudflare",
     "agents",
-    "durable-objects",
+    "agent-harness",
+    "human-in-the-loop",
+    "bun",
+    "workerd",
     "framework",
     "mcp"
   ],

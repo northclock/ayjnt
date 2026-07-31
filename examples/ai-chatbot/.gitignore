@@ -1,9 +1,0 @@
-node_modules
-
-.ayjnt/*
-!.ayjnt/migrations.json
-
-.wrangler
-.dev.vars
-.env
-.env.local

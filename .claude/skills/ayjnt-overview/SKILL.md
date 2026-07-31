@@ -114,14 +114,14 @@ should be gitignored.
 
 | Task | Skill | Example |
 |---|---|---|
-| Add a new agent under `agents/<route>/`. | `ayjnt-new-agent` | [`examples/basic`](../../../examples/basic) |
-| Add a React UI to an existing agent. | `ayjnt-add-ui` | [`examples/with-ui`](../../../examples/with-ui) |
-| Build an MCP agent (Claude Desktop, Codex, MCP clients). | `ayjnt-mcp` | [`examples/mcp`](../../../examples/mcp) |
-| Add auth or other middleware to a subtree. | `ayjnt-middleware` | [`examples/middleware`](../../../examples/middleware) |
-| Call one agent from another (typed RPC). | `ayjnt-rpc` | [`examples/inter-agent`](../../../examples/inter-agent) |
-| Give the model tools (workerd or Bun host). | `ayjnt-tools` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
-| Turn the project into a runnable program (`cli.ts`). | `ayjnt-cli-file` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
-| Run locally on ayjnt's runtime, or ship a binary. | `ayjnt-compile` | [`examples/compiled-cli`](../../../examples/compiled-cli) |
+| Add a new agent under `agents/<route>/`. | `ayjnt-new-agent` | [`examples/scheduler`](../../../examples/scheduler) |
+| Add a React UI to an existing agent. | `ayjnt-add-ui` | [`examples/code`](../../../examples/code) |
+| Build an MCP agent (Claude Desktop, Codex, MCP clients). | `ayjnt-mcp` | — |
+| Add auth or other middleware to a subtree. | `ayjnt-middleware` | — |
+| Call one agent from another (typed RPC). | `ayjnt-rpc` | [`examples/orchestration`](../../../examples/orchestration) |
+| Give the model tools (workerd or Bun host). | `ayjnt-tools` | [`examples/code`](../../../examples/code) |
+| Turn the project into a runnable program (`cli.ts`). | `ayjnt-cli-file` | [`examples/code`](../../../examples/code) |
+| Run locally on ayjnt's runtime, or ship a binary. | `ayjnt-compile` | [`examples/code`](../../../examples/code) |
 | Diagnose a failure mode. | `ayjnt-troubleshoot` | — |
 
 ## Gotchas to keep in mind

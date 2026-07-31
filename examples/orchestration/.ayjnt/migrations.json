@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "tag": "v1",
+      "timestamp": "2026-07-31T02:18:53.833Z",
+      "new_sqlite_classes": [
+        "LeadAgent",
+        "ResearcherAgent",
+        "ReviewerAgent"
+      ]
+    }
+  ],
+  "classes": {
+    "lead": {
+      "agentId": "lead",
+      "className": "LeadAgent",
+      "firstTag": "v1"
+    },
+    "researcher": {
+      "agentId": "researcher",
+      "className": "ResearcherAgent",
+      "firstTag": "v1"
+    },
+    "reviewer": {
+      "agentId": "reviewer",
+      "className": "ReviewerAgent",
+      "firstTag": "v1"
+    }
+  }
+}

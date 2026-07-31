@@ -1,22 +1,51 @@
 ---
 import BaseLayout from "./BaseLayout.astro";
-import { DocsSidebar } from "@/components/react/DocsSidebar.tsx";
+import { docsNavigation } from "../content/navigation";
 
-type Props = {
-	title?: string;
-	description?: string;
-};
+interface Props {
+  title: string;
+  description: string;
+  eyebrow?: string;
+}
 
-const currentPath = Astro.url.pathname;
-const { title, description } = Astro.props;
+const { title, description, eyebrow = "Documentation" } = Astro.props;
+const path = Astro.url.pathname;
 ---
-<BaseLayout title={title} description={description}>
-	<div class="mx-auto grid max-w-[1320px] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
-		<aside class="border-b border-[var(--ink)] md:border-b-0">
-			<DocsSidebar currentPath={currentPath} />
-		</aside>
-		<div class="min-w-0 px-6 py-12 md:px-12 md:py-14 lg:px-16">
-			<slot />
-		</div>
-	</div>
+
+<BaseLayout title={`${title} — Ayjnt docs`} description={description}>
+  <div class="docs-shell">
+    <aside class="docs-sidebar">
+      <div class="docs-sidebar-inner">
+        {docsNavigation.map((group) => (
+          <section>
+            <h2>{group.label}</h2>
+            {group.items.map((item) => (
+              <a class:list={{ active: path === item.href }} href={item.href}>{item.label}</a>
+            ))}
+          </section>
+        ))}
+      </div>
+    </aside>
+    <article class="docs-article">
+      <details class="docs-mobile-nav">
+        <summary>Documentation menu</summary>
+        <div>
+          {docsNavigation.map((group) => (
+            <section>
+              <h2>{group.label}</h2>
+              {group.items.map((item) => (
+                <a class:list={{ active: path === item.href }} href={item.href}>{item.label}</a>
+              ))}
+            </section>
+          ))}
+        </div>
+      </details>
+      <header class="docs-heading">
+        <span class="eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </header>
+      <div class="docs-prose"><slot /></div>
+    </article>
+  </div>
 </BaseLayout>

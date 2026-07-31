@@ -70,12 +70,13 @@ describe("generateEnvTypes", () => {
     );
     // Relative from /fake/.ayjnt to /fake/agents/chat/agent.ts
     expect(out).toContain(
-      `import type ChatAgent from "../agents/chat/agent.ts";`,
+      `import type __AyjntAgent0 from "../agents/chat/agent.ts";`,
     );
     expect(out).toContain(
-      "CHAT_AGENT: DurableObjectNamespace<ChatAgent>",
+      "CHAT_AGENT: DurableObjectNamespace<__AyjntAgent0>",
     );
-    expect(out).toContain("export type GeneratedEnv = {");
+    expect(out).toContain("interface GeneratedEnv {");
+    expect(out).toContain("export type GeneratedEnv = Ayjnt.GeneratedEnv");
   });
 
   test("multiple agents", () => {
@@ -93,14 +94,14 @@ describe("generateEnvTypes", () => {
       ]),
       "/fake/.ayjnt/env.d.ts",
     );
-    expect(out).toContain("CHAT_AGENT: DurableObjectNamespace<ChatAgent>");
-    expect(out).toContain("ORDERS_AGENT: DurableObjectNamespace<OrdersAgent>");
+    expect(out).toContain("CHAT_AGENT: DurableObjectNamespace<__AyjntAgent0>");
+    expect(out).toContain("ORDERS_AGENT: DurableObjectNamespace<__AyjntAgent1>");
   });
 
   test("empty manifest produces compilable output", () => {
     const out = generateEnvTypes(mf([]), "/fake/.ayjnt/env.d.ts");
     expect(out).toContain("// (no agents discovered)");
-    expect(out).toContain("// no agents");
+    expect(out).toContain("// no generated bindings");
   });
 });
 

@@ -154,8 +154,8 @@ scaffolding.
 
 ## Reference
 
-- [`examples/voice-agent`](../../../examples/voice-agent) — ChatAgent
-  with Workers AI STT + TTS and the UI from this skill.
+- [`examples/realtime-voice`](../../../examples/realtime-voice) — a
+  Gemini Live voice-to-voice harness with an audio-reactive UI.
 - [`src/runtime/voiceClient.tsx`](../../../src/runtime/voiceClient.tsx) —
   `AyjntVoiceTransport` + `useAyjntVoiceAgent`.
 - [Cloudflare Voice Agents docs](https://developers.cloudflare.com/agents/api-reference/voice/).

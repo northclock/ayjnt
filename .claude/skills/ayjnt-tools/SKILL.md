@@ -197,8 +197,8 @@ implementation because they're derived from it rather than restated.
 
 ## Reference
 
-- [`examples/compiled-cli`](../../../examples/compiled-cli) — a `notes`
-  agent with both `tools.ts` and `tools.host.ts`.
+- [`examples/code`](../../../examples/code) — a coding agent with
+  permissioned `tools.host.ts` access to files and commands.
 - [`ayjnt-browser`](../ayjnt-browser/SKILL.md) — `browserTools(this)`,
   which composes with `agentTools(this)`.
 - [`ayjnt-cli-file`](../ayjnt-cli-file/SKILL.md) — driving tools by hand
