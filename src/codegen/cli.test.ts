@@ -46,6 +46,7 @@ function mf(
     root: "/fake",
     agents,
     workflows,
+    wasmModules: [],
     features: {
       browser: false,
       email: false,
@@ -94,6 +95,14 @@ describe("assertNoReservedClientRoutes", () => {
         mf([agent({ routePath: "/cli", folderPath: "cli" })]),
       ),
     ).toThrow(/reserved name "cli"/);
+  });
+
+  test("rejects a route that would shadow @ayjnt/modules", () => {
+    expect(() =>
+      assertNoReservedClientRoutes(
+        mf([agent({ routePath: "/modules/math", folderPath: "modules/math" })]),
+      ),
+    ).toThrow(/reserved name "modules"/);
   });
 
   test("allows a route that merely starts with the reserved word", () => {

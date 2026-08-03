@@ -22,11 +22,11 @@ import type { AgentEntry, Manifest, WorkflowEntry } from "../core/types.ts";
 
 /**
  * Route names that would collide with a generated module under
- * `.ayjnt/client/`. `@ayjnt/cli` resolves to `client/cli.ts`, which TypeScript
- * prefers over `client/cli/index.tsx` — so an agent at `agents/cli/` would
- * silently shadow the generated CLI types with its own hook.
+ * `.ayjnt/client/`. `@ayjnt/cli` resolves to `client/cli.ts`, while
+ * `@ayjnt/modules/*` resolves to generated Wasm proxies. An agent using either
+ * first segment would create an ambiguous typed import.
  */
-export const RESERVED_CLIENT_ROUTES = new Set(["cli"]);
+export const RESERVED_CLIENT_ROUTES = new Set(["cli", "modules"]);
 
 /**
  * Reject agent routes whose first segment collides with a generated client

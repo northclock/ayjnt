@@ -26,7 +26,7 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import * as path from "node:path";
-import type { Miniflare } from "miniflare";
+import type { Miniflare, ModuleDefinition } from "miniflare";
 import {
   HOST_BRIDGE_BINDING,
   HOST_TOOLS_BINDING,
@@ -313,36 +313,55 @@ export async function startHost(
  * Read the bundle's modules for Miniflare's explicit `modules` array.
  *
  * The entry must come first — Miniflare treats `modules[0]` as the worker's
- * entrypoint. Any sibling `.js` files are included too: wrangler normally emits
- * a single self-contained `entry.js`, but code splitting would produce chunks,
- * and a missing chunk fails at runtime rather than at startup.
+ * entrypoint. Sibling `.js` chunks and `.wasm` modules are included too:
+ * wrangler normally emits a single JavaScript entry plus any imported binary
+ * modules, and a missing sibling fails at runtime rather than at startup.
  *
  * Paths are module-namespace-relative to the bundle directory, which is what
  * import specifiers inside the bundle resolve against.
  */
-async function collectModules(
+export async function collectModules(
   scriptPath: string,
   bundleDir: string,
-): Promise<{ type: "ESModule"; path: string; contents: string }[]> {
+): Promise<ModuleDefinition[]> {
   const entryRel = path.relative(bundleDir, scriptPath).replace(/\\/g, "/");
-  const files = existsSync(bundleDir)
-    ? readdirSync(bundleDir).filter(
-        (f) => f.endsWith(".js") && !f.endsWith(".map"),
-      )
-    : [];
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".js") || entry.name.endsWith(".wasm"))
+      ) {
+        files.push(path.relative(bundleDir, full).replace(/\\/g, "/"));
+      }
+    }
+  };
+  if (existsSync(bundleDir)) walk(bundleDir);
+  files.sort();
 
   const ordered = [
     entryRel,
-    ...files.filter((f) => f !== entryRel).map((f) => f),
+    ...files.filter((f) => f !== entryRel),
   ];
 
-  const modules: { type: "ESModule"; path: string; contents: string }[] = [];
+  const modules: ModuleDefinition[] = [];
   for (const rel of ordered) {
-    modules.push({
-      type: "ESModule",
-      path: rel,
-      contents: await Bun.file(path.join(bundleDir, rel)).text(),
-    });
+    const file = Bun.file(path.join(bundleDir, rel));
+    if (rel.endsWith(".wasm")) {
+      modules.push({
+        type: "CompiledWasm",
+        path: rel,
+        contents: new Uint8Array(await file.arrayBuffer()),
+      });
+    } else {
+      modules.push({
+        type: "ESModule",
+        path: rel,
+        contents: await file.text(),
+      });
+    }
   }
   return modules;
 }

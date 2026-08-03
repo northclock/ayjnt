@@ -145,6 +145,26 @@ export function generateWrangler(
     };
   }
 
+  // Compiled WebAssembly modules are ordinary static imports in generated
+  // proxies. Emit the interpretation explicitly so it remains part of
+  // Ayjnt's generated contract rather than depending on Wrangler defaults.
+  if (manifest.wasmModules.length > 0) {
+    const extraRules = Array.isArray(extras["rules"])
+      ? (extras["rules"] as unknown[])
+      : [];
+    config["rules"] = [
+      ...extraRules,
+      {
+        type: "CompiledWasm",
+        globs: ["**/*.wasm"],
+        // Wrangler also has a default Wasm rule. Being explicit is part of
+        // Ayjnt's generated contract; false tells Wrangler this rule is final
+        // and suppresses its otherwise noisy fallback warning.
+        fallthrough: false,
+      },
+    ];
+  }
+
   // Browser tools opt-in. Any agent importing from `"ayjnt/browser"`
   // flips `manifest.features.browser`; we mirror that into the three
   // bindings Cloudflare's `createBrowserTools` requires. The

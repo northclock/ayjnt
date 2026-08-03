@@ -13,7 +13,8 @@ human interface.
 | [`workflow`](./workflow) | Durable multi-step work with human approval |
 | [`orchestration`](./orchestration) | Typed delegation across several agents |
 
-Every project runs against the framework in this repository:
+Each folder is independently installable and contains the exact files
+shown by its guided page in the documentation site:
 
 ```sh
 cd examples/code
@@ -22,4 +23,9 @@ bun run dev
 ```
 
 Generated `.ayjnt/`, `.wrangler/`, and dependency directories are ignored. The
-source tree is deliberately small enough to read in one sitting.
+source tree is deliberately small enough to read in one sitting. Use the root
+framework CLI while developing changes in this repository:
+
+```sh
+bun run bin/ayjnt.ts build --cwd examples/orchestration
+```

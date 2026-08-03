@@ -1,0 +1,309 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Code from "../../components/Code.astro";
+
+const tree = `my-agent/
+├── agents/
+├── workflows/
+├── modules/                  # optional, compiled artifacts
+│   ├── math.wasm             # @ayjnt/modules/math
+│   └── image/
+│       └── resize.wasm       # @ayjnt/modules/image/resize
+├── native/                   # optional source; organize it however you like
+└── package.json`;
+
+const agentUsage = `// agents/calculator/agent.ts
+import { Agent } from "ayjnt";
+import mathModule from "@ayjnt/modules/math";
+
+type MathExports = {
+  add(a: number, b: number): number;
+};
+
+// Instantiated once when this workerd isolate starts.
+const instance = await WebAssembly.instantiate(mathModule);
+const math = instance.exports as MathExports;
+
+export default class CalculatorAgent extends Agent {
+  override async onRequest(): Promise<Response> {
+    return Response.json({ result: math.add(20, 22) });
+  }
+}`;
+
+const workflowUsage = `// agents/report/workflow.ts
+import {
+  AgentWorkflow,
+  type AgentWorkflowEvent,
+  type AgentWorkflowStep,
+} from "ayjnt/workflows";
+import statsModule from "@ayjnt/modules/stats";
+
+type StatsExports = {
+  score(value: number): number;
+};
+
+const stats = (await WebAssembly.instantiate(statsModule))
+  .exports as StatsExports;
+
+type Params = { value: number };
+
+export default class ReportWorkflow extends AgentWorkflow<Params> {
+  override async run(
+    event: Readonly<AgentWorkflowEvent<Params>>,
+    _step: AgentWorkflowStep,
+  ) {
+    return { score: stats.score(event.payload.value) };
+  }
+}`;
+
+const isolatedInstances = `import parserModule from "@ayjnt/modules/parser";
+
+// Use a fresh instance when exported memory or globals must not be shared.
+async function parseIsolated(input: Uint8Array) {
+  const instance = await WebAssembly.instantiate(parserModule);
+  // Copy input into instance.exports.memory, then call the parser export.
+  return instance;
+}`;
+
+const rustCargo = `[package]
+name = "ayjnt-math"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+strip = true`;
+
+const rustSource = `#[unsafe(no_mangle)]
+pub extern "C" fn add(a: i32, b: i32) -> i32 {
+    a + b
+}`;
+
+const rustBuild = `rustup target add wasm32-unknown-unknown
+cargo build --manifest-path native/math-rust/Cargo.toml \\
+  --release --target wasm32-unknown-unknown
+cp native/math-rust/target/wasm32-unknown-unknown/release/ayjnt_math.wasm \\
+  modules/math.wasm`;
+
+const zigSource = `export fn add(a: i32, b: i32) i32 {
+    return a + b;
+}`;
+
+const zigBuild = `zig build-exe native/math.zig \\
+  -target wasm32-freestanding \\
+  -O ReleaseFast \\
+  -fno-entry \\
+  --export=add \\
+  -femit-bin=modules/math.wasm`;
+
+const cSource = `// native/math.c
+int add(int a, int b) {
+  return a + b;
+}`;
+
+const cppSource = `// native/math.cpp
+extern "C" int add(int a, int b) {
+  return a + b;
+}`;
+
+const cBuild = `# C
+clang --target=wasm32 -O3 -nostdlib \\
+  -Wl,--no-entry -Wl,--export=add \\
+  -o modules/math.wasm native/math.c
+
+# C++: use clang++ with the same linker flags
+clang++ --target=wasm32 -O3 -nostdlib \\
+  -Wl,--no-entry -Wl,--export=add \\
+  -o modules/math.wasm native/math.cpp`;
+
+const goSource = `package main
+
+//go:wasmexport add
+func add(a, b int32) int32 {
+    return a + b
+}
+
+func main() {}`;
+
+const goBuild = `GOOS=wasip1 GOARCH=wasm go build \\
+  -buildmode=c-shared \\
+  -o modules/math.wasm \\
+  ./native/math-go`;
+
+const goUsage = `import {
+  ConsoleStdout,
+  File,
+  OpenFile,
+  WASI,
+} from "@bjorn3/browser_wasi_shim";
+import mathModule from "@ayjnt/modules/math";
+
+const wasi = new WASI([], [], [
+  new OpenFile(new File([])),
+  ConsoleStdout.lineBuffered((line) => console.log(line)),
+  ConsoleStdout.lineBuffered((line) => console.error(line)),
+]);
+
+type GoInstance = WebAssembly.Instance & {
+  exports: WebAssembly.Exports & {
+    memory: WebAssembly.Memory;
+    _initialize(): void;
+    add(a: number, b: number): number;
+  };
+};
+
+const instance = new WebAssembly.Instance(mathModule, {
+  wasi_snapshot_preview1: wasi.wasiImport,
+}) as GoInstance;
+
+// Go's c-shared Wasm output is a reactor. Initialize it once before use.
+wasi.initialize(instance);
+const { add } = instance.exports;`;
+---
+
+<DocsLayout
+  title="WebAssembly modules"
+  description="Compile compute-heavy Rust, Zig, C, C++, or Go code to WebAssembly and call it from Ayjnt agents and workflows in workerd."
+  eyebrow="Agent capabilities"
+>
+  <p>
+    Put compiled <code>.wasm</code> artifacts in an optional root-level
+    <code>modules/</code> directory. Ayjnt discovers them recursively, generates
+    stable imports, and packages the same precompiled modules for
+    <code>dev</code>, <code>run</code>, <code>compile</code>, and
+    <code>deploy</code>.
+  </p>
+  <Code title="project tree" language="text" code={tree} />
+
+  <div class="callout">
+    <strong>Ayjnt loads artifacts; it does not run language toolchains.</strong>
+    <p>
+      Compile source code before starting Ayjnt. Commit the resulting Wasm or
+      run its compiler in your build pipeline. A source-file change alone does
+      not rebuild the artifact.
+    </p>
+  </div>
+
+  <h2 id="import-and-run">Import and run a module</h2>
+  <p>
+    A file at <code>modules/math.wasm</code> is imported from
+    <code>@ayjnt/modules/math</code>. Nested paths are preserved. The default
+    export is a precompiled <code>WebAssembly.Module</code>, not bytes, so pass
+    it directly to <code>WebAssembly.instantiate()</code>.
+  </p>
+  <Code title="agents/calculator/agent.ts" code={agentUsage} />
+  <p>
+    The same import works in a co-located or shared workflow:
+  </p>
+  <Code title="agents/report/workflow.ts" code={workflowUsage} />
+
+  <h2 id="instance-lifecycle">Choose an instance lifecycle</h2>
+  <p>
+    Module-scope instantiation does the compilation and initialization once per
+    workerd isolate. It is the best default for pure functions. An instance's
+    exported memory and mutable globals are shared by calls in that isolate,
+    so create a fresh instance when one operation must not observe another's
+    Wasm state.
+  </p>
+  <Code title="isolated.ts" code={isolatedInstances} />
+  <p>
+    Module-scope state must never hold request-specific or user-specific data.
+    For large inputs, copy a batch into exported linear memory and make one
+    Wasm call; repeated tiny calls can spend more time crossing the JavaScript
+    boundary than doing useful work.
+  </p>
+
+  <h2 id="abi">Keep the first ABI small</h2>
+  <p>
+    JavaScript can call numeric Wasm parameters and results directly:
+    <code>i32</code>, <code>i64</code>, <code>f32</code>, and <code>f64</code>.
+    JavaScript represents <code>i64</code> as <code>bigint</code>. Strings,
+    arrays, structs, and errors need an explicit ABI using exported linear
+    memory, offsets, lengths, and an allocator owned by one side. Start with
+    scalar functions, then document memory ownership beside the module adapter.
+  </p>
+
+  <h2 id="rust">Rust</h2>
+  <p>
+    Use Rust's freestanding <code>wasm32-unknown-unknown</code> target. A
+    <code>cdylib</code> produces a Wasm module, and the C ABI keeps exported
+    scalar signatures predictable.
+  </p>
+  <Code title="native/math-rust/Cargo.toml" language="toml" code={rustCargo} />
+  <Code title="native/math-rust/src/lib.rs" language="rust" code={rustSource} />
+  <Code title="terminal" code={rustBuild} />
+
+  <h2 id="zig">Zig</h2>
+  <p>
+    Zig ships a freestanding WebAssembly target. Exported functions become
+    members of <code>instance.exports</code> without a JavaScript glue file.
+  </p>
+  <Code title="native/math.zig" language="zig" code={zigSource} />
+  <Code title="terminal" code={zigBuild} />
+
+  <h2 id="c-cpp">C and C++</h2>
+  <p>
+    Compile freestanding code with Clang, omit a program entry point, and list
+    every function that should be callable. C++ exports need
+    <code>extern "C"</code> to avoid name mangling. Code requiring libc or
+    libc++ needs an appropriate Wasm sysroot and is beyond this minimal ABI.
+    Use an LLVM distribution with the WebAssembly target enabled; Apple's
+    system Clang may not include that backend.
+  </p>
+  <Code title="native/math.c" language="c" code={cSource} />
+  <Code title="native/math.cpp" language="cpp" code={cppSource} />
+  <Code title="terminal" code={cBuild} />
+
+  <h2 id="go">Go</h2>
+  <p>
+    Go 1.24 or newer can build a WASI reactor and expose functions with
+    <code>//go:wasmexport</code>. Unlike the freestanding examples above, the
+    resulting module needs WASI imports and must run its
+    <code>_initialize</code> export before use.
+  </p>
+  <Code title="native/math-go/main.go" language="go" code={goSource} />
+  <Code title="terminal" code={goBuild} />
+  <p>Install a user-space WASI Preview 1 shim:</p>
+  <Code title="terminal" code={`bun add @bjorn3/browser_wasi_shim`} />
+  <Code title="agents/calculator/go-math.ts" code={goUsage} />
+  <div class="callout">
+    <strong>WASI support is experimental.</strong>
+    <p>
+      The Go example's user-space shim implements only part of WASI Preview 1.
+      Prefer a freestanding module when the operation does not need system
+      calls, and verify every required syscall in local workerd and Cloudflare
+      before deploying.
+    </p>
+  </div>
+
+  <h2 id="limits">Runtime constraints</h2>
+  <ul>
+    <li>Workers do not provide WebAssembly threads or Web Workers.</li>
+    <li>
+      Runtime compilation from raw bytes and streaming instantiation are not
+      available; import the precompiled module from <code>modules/</code>.
+    </li>
+    <li>
+      Language runtimes can make Wasm substantially larger. Prefer release
+      builds and consider <code>wasm-opt</code> after measuring behavior.
+    </li>
+    <li>
+      Wasm shares the Worker's CPU and memory budget. It is an execution format,
+      not an additional security or resource boundary inside the isolate.
+    </li>
+  </ul>
+
+  <h2 id="references">References</h2>
+  <ul>
+    <li><a href="https://developers.cloudflare.com/workers/runtime-apis/webassembly/">Cloudflare Workers WebAssembly</a></li>
+    <li><a href="https://developers.cloudflare.com/workers/wrangler/configuration/#bundling">Wrangler module rules</a></li>
+    <li><a href="https://doc.rust-lang.org/stable/rustc/platform-support/wasm32-unknown-unknown.html">Rust wasm32-unknown-unknown target</a></li>
+    <li><a href="https://go.dev/blog/wasmexport">Go Wasm exports and reactors</a></li>
+    <li><a href="https://github.com/bjorn3/browser_wasi_shim">Browser WASI shim</a></li>
+  </ul>
+</DocsLayout>

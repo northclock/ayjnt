@@ -15,6 +15,7 @@ function mf(
     root: "/fake",
     agents,
     workflows,
+    wasmModules: [],
     features: {
       browser: false,
       email: false,
@@ -163,6 +164,25 @@ describe("generateWrangler", () => {
       // browser URL and breaks useAgent's URL-derived instance lookup.
       html_handling: "none",
     });
+  });
+
+  test("WebAssembly modules add the CompiledWasm rule", () => {
+    const manifest = mf([agent({})]);
+    manifest.wasmModules = [
+      {
+        modulePath: "math.wasm",
+        importPath: "@ayjnt/modules/math",
+        sourceFile: "/fake/modules/math.wasm",
+      },
+    ];
+    const cfg = parse(generateWrangler(manifest, lockfile, { name: "app" }));
+    expect(cfg["rules"]).toEqual([
+      {
+        type: "CompiledWasm",
+        globs: ["**/*.wasm"],
+        fallthrough: false,
+      },
+    ]);
   });
 
   test("features.browser=false: no browser/worker_loaders/ai bindings", () => {

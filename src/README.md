@@ -57,6 +57,9 @@ Every `ayjnt dev | build | deploy` funnels through `src/cli/build.ts::runBuild`:
 5. `writeLockfile` — persist (unless deploy suppresses this)
 6. `generateEntry` → `.ayjnt/dist/entry.ts`
 7. `generateWrangler` → `.ayjnt/dist/wrangler.jsonc`
+8. `generateEnvTypes` / `generateCliTypes` → ambient environment,
+   workflow registry, and project-specific CLI declarations
+9. `bundleApp` → generated React hooks and Assets-binding files
 
 Each step is a pure function of its inputs. I/O lives at the edges (`scan`, `readLockfile`, `writeLockfile`, the file writes in `runBuild`). This makes every piece testable without mocks — see `src/codegen/*.test.ts`.
 
@@ -70,7 +73,7 @@ Each step is a pure function of its inputs. I/O lives at the edges (`scan`, `rea
 | Change generated wrangler config | [`codegen/wrangler.ts`](./codegen/wrangler.ts) |
 | Change generated worker entrypoint | [`codegen/entry.ts`](./codegen/entry.ts) |
 | Change a type flowing between stages | [`core/types.ts`](./core/types.ts) |
-| Add a user-facing runtime helper | [`runtime/`](./runtime/) |
+| Change `Agent<State>`, class-safe RPC, workflows, sessions, or clients | [`runtime/`](./runtime/) plus the generated relationships in [`codegen/`](./codegen/) |
 | Change how the local runtime is configured | [`cli/host.ts`](./cli/host.ts) — wrangler config → Miniflare options |
 | Change the `cli.ts` context | [`runtime/cliContext.ts`](./runtime/cliContext.ts) for the types, [`cli/host.ts`](./cli/host.ts) for the objects, [`codegen/cli.ts`](./codegen/cli.ts) for the generated view |
 | Change the workerd↔host tool protocol | [`core/hostBridge.ts`](./core/hostBridge.ts) — both sides import it |
@@ -83,11 +86,14 @@ Deeper guides: [`cli/README.md`](./cli/README.md), [`codegen/README.md`](./codeg
 - Co-locate tests: `foo.ts` + `foo.test.ts`.
 - Pure functions tested directly; I/O functions tested with `mkdtempSync` + `rmSync`.
 - No mocking frameworks. Inputs are plain data; outputs are strings or plain data.
-- `bun test` runs everything. ~50ms total for the full suite.
+- `bun test` runs the complete suite, including generated-source
+  assertions and local-runtime behavior.
 
 ## Style
 
 - Absolute paths are stored as absolute paths. Relative paths must declare what they're relative to.
 - Types import type-only (`import type { ... }`) — `verbatimModuleSyntax` is on.
 - Every file has a header comment saying what it does and how it fits into the pipeline. Keep those honest.
-- Avoid dependencies. The only runtime deps are Bun built-ins and peer deps (`agents`, `wrangler`). Adding a dependency is a decision, not a reflex.
+- Avoid dependencies. Runtime code primarily uses Bun built-ins,
+  `wrangler`, and peer APIs from `agents`, `ai`, and `zod`. Adding a
+  dependency is a decision, not a reflex.

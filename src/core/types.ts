@@ -153,6 +153,19 @@ export type WorkflowEntry = {
   baseClass: string;
 };
 
+/** A compiled WebAssembly module discovered under the optional root-level
+ *  `modules/` directory. Ayjnt generates a stable TypeScript proxy for each
+ *  entry so worker code imports `@ayjnt/modules/<path>` instead of depending
+ *  on its own depth beneath agents/ or workflows/. */
+export type WasmModuleEntry = {
+  /** Path relative to `modules/`, including the `.wasm` extension. */
+  modulePath: string;
+  /** Stable public specifier, e.g. `@ayjnt/modules/image/resize`. */
+  importPath: string;
+  /** Absolute path to the compiled `.wasm` artifact. */
+  sourceFile: string;
+};
+
 /** Optional root-level UI :)
  * `agents/app.tsx` - a home page served at `/`
  * gated gy the root middlewareChain. Sibling to ` agents/middleware.ts`
@@ -173,6 +186,8 @@ export type Manifest = {
   agents: AgentEntry[];
   /** All workflows, in stable order (alphabetical by className). */
   workflows: WorkflowEntry[];
+  /** Compiled WebAssembly modules under root `modules/`, sorted by path. */
+  wasmModules: WasmModuleEntry[];
   /** Feature opt-ins detected from agent source — see {@link FeatureFlags}. */
   features: FeatureFlags;
   /** Root-level home UI, or null when there's no agent/app.tsx */

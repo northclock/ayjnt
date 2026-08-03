@@ -23,6 +23,9 @@ export type BundleResult = {
   scriptPath: string;
   /** Directory containing the script — Miniflare's `modulesRoot`. */
   bundleDir: string;
+  /** Every JavaScript and WebAssembly module emitted by Wrangler, with the
+   *  entry script first. Used by `compile` to embed the complete module graph. */
+  modulePaths: string[];
 };
 
 export type BundleOptions = {
@@ -91,7 +94,35 @@ export async function bundleWorker(
     );
   }
 
-  return { scriptPath, bundleDir: opts.outDir };
+  return {
+    scriptPath,
+    bundleDir: opts.outDir,
+    modulePaths: collectBundleModulePaths(scriptPath, opts.outDir),
+  };
+}
+
+/** Collect the deployable module graph emitted by Wrangler. Source maps and
+ *  metadata are intentionally excluded: workerd only needs JS and Wasm. */
+export function collectBundleModulePaths(
+  scriptPath: string,
+  bundleDir: string,
+): string[] {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".js") || entry.name.endsWith(".wasm"))
+      ) {
+        files.push(full);
+      }
+    }
+  };
+  if (existsSync(bundleDir)) walk(bundleDir);
+  files.sort();
+  return [scriptPath, ...files.filter((file) => file !== scriptPath)];
 }
 
 /**

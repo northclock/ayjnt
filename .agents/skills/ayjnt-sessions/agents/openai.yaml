@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ayjnt Sessions"
+  short_description: "Add durable agent conversation sessions"
+  default_prompt: "Use $ayjnt-sessions to add durable sessions and memory to this Ayjnt agent."

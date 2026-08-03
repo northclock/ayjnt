@@ -15,6 +15,8 @@ const tree = `my-agent/
 │   │   └── docs.md             # route documentation
 │   └── orders/
 │       └── agent.ts            # /orders/:instance
+├── modules/                    # optional compiled WebAssembly modules
+│   └── math.wasm               # @ayjnt/modules/math
 ├── cli.ts                      # terminal interface
 ├── package.json
 └── tsconfig.json`;
@@ -43,6 +45,7 @@ const tree = `my-agent/
       <tr><td><code>tools.ts</code></td><td>Model tools executed beside the agent in workerd.</td><td><a href="/docs/tools/">Tools →</a></td></tr>
       <tr><td><code>tools.host.ts</code></td><td>Explicit file, shell, database, and Bun host capabilities.</td><td><a href="/docs/host-bridge/">Host bridge →</a></td></tr>
       <tr><td><code>workflow.ts</code></td><td>Co-located durable, multi-step work.</td><td><a href="/docs/workflows/">Workflows →</a></td></tr>
+      <tr><td><code>modules/**/*.wasm</code></td><td>Compiled WebAssembly shared by agents and workflows in workerd.</td><td><a href="/docs/wasm-modules/">WebAssembly modules →</a></td></tr>
       <tr><td><code>middleware.ts</code></td><td>Inherited authentication, logging, and request policy.</td><td><a href="/docs/routing/">Routing & middleware →</a></td></tr>
       <tr><td><code>docs.md</code></td><td>Agent-specific documentation behind the same middleware.</td><td><a href="/docs/file-conventions/#route-docs">Route docs ↓</a></td></tr>
       <tr><td><code>cli.ts</code></td><td>Foreground terminal program powered by Bun.</td><td><a href="/docs/cli/run/">Run command →</a></td></tr>

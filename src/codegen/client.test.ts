@@ -40,6 +40,7 @@ function mf(
     root: "/fake",
     agents,
     workflows,
+    wasmModules: [],
     features: {
       browser: false,
       email: false,

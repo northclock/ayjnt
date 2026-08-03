@@ -14,7 +14,7 @@ Each file here implements one user-facing command. `index.ts` is the router. Thi
 | [`migrate.ts`](./migrate.ts) | `ayjnt migrate` | Dry-run diff. Doesn't write, doesn't deploy. |
 | [`host.ts`](./host.ts) | — | The local runtime. Translates the generated wrangler config into Miniflare options and builds the `cli.ts` context. |
 | [`hostTools.ts`](./hostTools.ts) | — | Loads `tools.host.ts` modules, derives their JSON Schemas, and gates execution by declared side effects. |
-| [`bundle.ts`](./bundle.ts) | — | Shells out to `wrangler deploy --dry-run --outdir` for a workerd-ready bundle. |
+| [`bundle.ts`](./bundle.ts) | — | Shells out to `wrangler deploy --dry-run --outdir` for a workerd-ready JavaScript + WebAssembly module graph. |
 | [`util.ts`](./util.ts) | — | Shared arg parser and wrangler spawner. |
 | [`index.ts`](./index.ts) | — | Command dispatch. |
 

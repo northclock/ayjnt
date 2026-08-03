@@ -49,6 +49,10 @@ import {
 } from "../codegen/cli.ts";
 import { generateEntry } from "../codegen/entry.ts";
 import {
+  generateWasmProxy,
+  wasmProxyPath,
+} from "../codegen/modules.ts";
+import {
   applyDiff,
   diffChangesLockfile,
   diffMigrations,
@@ -122,6 +126,9 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   const dotDir = path.join(cwd, ".ayjnt");
   const outDir = path.join(dotDir, "dist");
   const clientDir = path.join(dotDir, "client");
+  // Lives inside client/ so every existing project-wide `@ayjnt/*` path
+  // mapping resolves Wasm proxies without a tsconfig migration.
+  const modulesDir = path.join(clientDir, "modules");
   const assetsScoped = path.join(dotDir, "assets", "__ayjnt");
 
   // 3: client tree. Wiped first — it is fully regenerated below, and a
@@ -129,11 +136,20 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   // `@ayjnt/<route>` import compiling against a route the worker no
   // longer serves.
   rmSync(clientDir, { recursive: true, force: true });
-  for (const dir of [dotDir, outDir, clientDir]) {
+  for (const dir of [dotDir, outDir, clientDir, modulesDir]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   }
 
   await Bun.write(path.join(dotDir, "tsconfig.json"), generateTsconfig());
+
+  // Stable, depth-independent imports for root modules/**/*.wasm. Each proxy
+  // preserves a static artifact import so Wrangler can discover and compile
+  // only modules actually referenced by an agent or workflow.
+  for (const wasm of manifest.wasmModules) {
+    const proxyPath = path.join(modulesDir, wasmProxyPath(wasm));
+    mkdirSync(path.dirname(proxyPath), { recursive: true });
+    await Bun.write(proxyPath, generateWasmProxy(wasm, proxyPath));
+  }
 
   const envPath = path.join(dotDir, "env.d.ts");
   await Bun.write(envPath, generateEnvTypes(manifest, envPath));
@@ -301,8 +317,11 @@ export async function runBuild(opts: RunBuildOptions): Promise<BuildResult> {
   const appSuffix = appCount ? `, ${appCount} with UI` : "";
   const docsSuffix = docsCount ? `, ${docsCount} with docs` : "";
   const homeSuffix = rootAppBundle ? `, home UI at /` : "";
+  const wasmSuffix = manifest.wasmModules.length
+    ? `, ${manifest.wasmModules.length} Wasm module(s)`
+    : "";
   log(
-    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix}${docsSuffix}${homeSuffix} → .ayjnt/dist/wrangler.jsonc`,
+    `✓ ayjnt: ${manifest.agents.length} agent(s)${appSuffix}${docsSuffix}${homeSuffix}${wasmSuffix} → .ayjnt/dist/wrangler.jsonc`,
   );
 
   return {

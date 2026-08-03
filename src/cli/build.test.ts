@@ -373,3 +373,48 @@ describe("runBuild root home app", () => {
     rmSync(proj, { recursive: true, force: true });
   });
 });
+
+describe("runBuild WebAssembly modules", () => {
+  test("generates a stable proxy and CompiledWasm rule", async () => {
+    const proj = mkdtempSync(path.join(tmpdir(), "ayjnt-wasm-build-"));
+    await mkdir(path.join(proj, "agents/math"), { recursive: true });
+    await mkdir(path.join(proj, "modules/numeric"), { recursive: true });
+    await writeFile(
+      path.join(proj, "package.json"),
+      JSON.stringify({ name: "wasm-test", type: "module" }),
+    );
+    await writeFile(
+      path.join(proj, "agents/math/agent.ts"),
+      `export default class MathAgent extends Agent {}`,
+    );
+    await writeFile(
+      path.join(proj, "modules/numeric/math.wasm"),
+      new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]),
+    );
+
+    await runBuild({ cwd: proj, quiet: true });
+
+    const proxyPath = path.join(
+      proj,
+      ".ayjnt/client/modules/numeric/math.ts",
+    );
+    expect(readFileSync(proxyPath, "utf8")).toContain(
+      'import wasmModule from "../../../../modules/numeric/math.wasm";',
+    );
+    const cfg = JSON.parse(
+      readFileSync(path.join(proj, ".ayjnt/dist/wrangler.jsonc"), "utf8")
+        .split("\n")
+        .slice(1)
+        .join("\n"),
+    );
+    expect(cfg.rules).toEqual([
+      {
+        type: "CompiledWasm",
+        globs: ["**/*.wasm"],
+        fallthrough: false,
+      },
+    ]);
+
+    rmSync(proj, { recursive: true, force: true });
+  });
+});

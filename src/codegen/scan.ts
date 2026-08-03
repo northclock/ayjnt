@@ -20,6 +20,7 @@ import {
   type ToolsEntry,
   type WorkflowEntry,
 } from "../core/types.ts";
+import { scanWasmModules } from "./modules.ts";
 
 export type { AgentEntry, CallableMethod, ToolsEntry, WorkflowEntry };
 
@@ -49,6 +50,7 @@ export async function scan(root: string): Promise<Manifest> {
       root,
       agents: [],
       workflows: await scanWorkflows(root),
+      wasmModules: await scanWasmModules(root),
       features: emptyFeatures(),
       rootApp: null,
       cliFile: resolveCliFile(root),
@@ -135,6 +137,7 @@ export async function scan(root: string): Promise<Manifest> {
   assertUnique(entries);
 
   const workflows = await scanWorkflows(root);
+  const wasmModules = await scanWasmModules(root);
   assertUniqueWorkflows(workflows, entries);
 
   /** Root middleware chain (root → leaf), same shape as
@@ -151,6 +154,7 @@ export async function scan(root: string): Promise<Manifest> {
     root,
     agents: entries,
     workflows,
+    wasmModules,
     features,
     rootApp,
     cliFile: resolveCliFile(root),

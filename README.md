@@ -56,10 +56,19 @@ export default class ChatAgent extends Agent<State> {
 
 Save it, and `ayjnt dev` picks it up — no config, no registration, no migration files to hand-write.
 
-Ayjnt's `Agent` is a thin subclass of Cloudflare's Agents SDK class. If you
-prefer the upstream class, `import { Agent } from "agents"` is equally
-supported in `agent.ts`; discovery, routing, generated bindings, UIs, and tools
-work the same way.
+Ayjnt's `Agent` is a transparent subclass of Cloudflare's Agents SDK class. If
+you need to own the complete environment generic, use the unchanged escape
+hatch:
+
+```ts
+import { CloudflareAgent } from "ayjnt";
+
+export default class AdvancedAgent
+  extends CloudflareAgent<MyEnv, State> {}
+```
+
+Both default exports are discovered and routed the same way. Ayjnt's wrapper
+adds class-safe peer lookup, co-located workflow dispatch, and session helpers.
 
 ## File conventions — the whole API
 
@@ -72,9 +81,40 @@ work the same way.
 | `agents/**/middleware.ts` | Hono-style middleware for every descendant agent. Files chain root → leaf, like Next.js layouts. |
 | `agents/<route>/tools.ts` | Optional model tools that run **in workerd**, next to the agent. Deploy like any other worker code. |
 | `agents/<route>/tools.host.ts` | Optional model tools that run **on the Bun host**, so they can use `Bun.$`, `Bun.file`, `bun:sqlite`. Cannot be deployed to Cloudflare. |
+| `agents/<route>/workflow.ts` | Optional durable workflow paired with the agent by co-location. |
+| `modules/**/*.wasm` | Optional compiled WebAssembly modules imported as `@ayjnt/modules/<path>` by agents and workflows. |
 | `cli.ts` | Optional root-level program. `ayjnt run` (and a compiled binary) boots the worker and calls it in the foreground; when it returns, everything stops. |
 | `agents/(group)/` | Route group — stripped from the URL, but its `middleware.ts` still applies. |
-| `export const agentId = "..."` | Optional stable ID in `agent.ts`, so renaming the folder preserves the DO's storage. |
+| `export const agentId = "..."` | Optional explicit identity for complex refactors. Plain folder moves are already tracked by class name. |
+
+## Core APIs
+
+Call another top-level agent by class value so TypeScript and the runtime use
+the same identity:
+
+```ts
+import { Agent } from "ayjnt";
+import InventoryAgent from "../inventory/agent";
+
+export default class OrdersAgent extends Agent {
+  async reserve(sku: string, quantity: number) {
+    const inventory = await this.agent(InventoryAgent, "primary");
+    return inventory.reserve(sku, quantity);
+  }
+}
+```
+
+Add `workflow.ts` beside `agent.ts`, extend `AgentWorkflow<Params>`, and start it
+without a mixin or binding name:
+
+```ts
+const workflowId = await this.workflow({ documentId });
+```
+
+Browser interfaces use their generated `useAgent()` hook and typed
+`agent.stub.method(...)` calls. Terminal interfaces live in the root `cli.ts`.
+Durable state, SQLite, schedules, sub-agents, and Cloudflare's experimental
+sessions remain available on the same `Agent<State>` class.
 
 ## Commands
 
@@ -132,16 +172,21 @@ That extra capability is exactly why host tools can't be deployed: there is no
 host process on Cloudflare, so `ayjnt deploy` refuses a project containing a
 `tools.host.ts` rather than shipping something that faults on its first tool call.
 
-The cost of compiling is size — roughly 170MB, most of it workerd — and that
+The cost of compiling is a large platform-dependent binary, mostly workerd, and that
 Workers AI, Browser Rendering and email sending remain remote services needing
-network access and credentials. `--no-embed-workerd` trades self-containment for
-about 67MB.
+network access and credentials. `--no-embed-workerd` trades self-containment
+for a smaller artifact that requires `AYJNT_WORKERD_PATH`.
 
 ## Deploys and migrations
 
 `.ayjnt/migrations.json` is committed to git and is the source of truth for what's in production. `ayjnt deploy` refuses to run from a dirty or unsynced tree, so two developers can't race and produce divergent migration histories (`--force` bypasses, loudly).
 
-Migrations are append-only and derived from your folder tree: renaming an agent folder while keeping its `agentId` preserves storage; removing the `agentId` deletes the DO and its storage irreversibly. `ayjnt migrate` previews what a build would stage.
+Migrations are append-only and derived from your folder tree. A plain folder
+move with the same class preserves storage automatically, and an in-place class
+rename becomes a Durable Object rename migration. Use an explicit `agentId`
+when a larger refactor would otherwise make identity ambiguous. Removing an
+agent entirely stages a destructive deletion; `ayjnt migrate` previews every
+pending change before a build writes it.
 
 ## Going deeper
 
@@ -149,13 +194,16 @@ Migrations are append-only and derived from your folder tree: renaming an agent 
 - [`src/README.md`](./src/README.md) — package architecture and the codegen pipeline
 - [`src/codegen/README.md`](./src/codegen/README.md) — contracts between pipeline stages
 - [`src/runtime/README.md`](./src/runtime/README.md) — runtime helpers, RPC gotchas
+- [`.agents/skills/`](./.agents/skills) — portable coding-agent guidance,
+  mirrored in [`.claude/skills/`](./.claude/skills) for Claude Code
 
 ## Development
 
 ```sh
 bun install
 bun test          # run all tests
-bunx tsc --noEmit # typecheck
+bun run typecheck # server + client typecheck
+bun run build     # build package artifacts
 bun run bin/ayjnt.ts build --cwd examples/scheduler
 ```
 

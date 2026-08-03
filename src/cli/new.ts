@@ -177,32 +177,30 @@ async function scaffold(
     await Bun.write(path.join(target, "agents", "app.tsx"), homeApp());
   }
 
-  // Drop the Claude Code skills next to the project so authors who use
-  // Claude Code get the ayjnt-* skills (new-agent, mcp-app, middleware,
-  // rpc, troubleshoot, etc.) auto-loaded. Best-effort: silently skipped
-  // if the package wasn't installed with `.claude/skills` shipped (e.g.
-  // an old framework version) or if the resolved path doesn't exist.
-  copySkills(target);
+  // Drop portable and Claude Code skill copies next to the project so
+  // supported coding agents can discover the same ayjnt guidance.
+  // Best-effort: an older package may not ship one or both directories.
+  copySkills(target, ".agents");
+  copySkills(target, ".claude");
 }
 
 /**
- * Find `.claude/skills/` relative to this module and copy it into the new
+ * Find `<directory>/skills/` relative to this module and copy it into the
  * project. The compiled CLI lives at `<package-root>/dist/ayjnt.js` (one
- * level below the root, hence the first candidate), while in framework
- * dev this module runs from `<package-root>/src/cli/new.ts` (two levels
- * below, hence the second).
+ * level below the root), while framework development runs this module from
+ * `<package-root>/src/cli/new.ts` (two levels below).
  */
-function copySkills(target: string): void {
+function copySkills(target: string, directory: ".agents" | ".claude"): void {
   // `import.meta.url` works in both Bun's direct .ts execution and the
   // bundled .js artifact.
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(cliDir, "..", ".claude", "skills"),
-    path.resolve(cliDir, "..", "..", ".claude", "skills"),
+    path.resolve(cliDir, "..", directory, "skills"),
+    path.resolve(cliDir, "..", "..", directory, "skills"),
   ];
   const source = candidates.find((p) => existsSync(p));
   if (!source) return; // shipping without skills — that's fine
-  const dest = path.join(target, ".claude", "skills");
+  const dest = path.join(target, directory, "skills");
   mkdirSync(path.dirname(dest), { recursive: true });
   cpSync(source, dest, { recursive: true });
 }
@@ -396,13 +394,13 @@ ${body}
 | \`bun run deploy\` | Build + git-safety checks + \`wrangler deploy\`. |
 | \`bun run migrate\` | Preview pending migrations. |
 
-## Claude Code skills
+## Coding-agent skills
 
-The \`.claude/skills/\` directory ships with this scaffold. If you use
-Claude Code, those skills auto-load when you open this project and
-guide authoring tasks like *add an agent*, *add a UI*, *make an MCP
-App*, *call another agent*, and *troubleshoot a failure*. They're
-plain markdown — edit or delete any that don't fit your house style.
+The portable \`.agents/skills/\` directory and its Claude Code mirror at
+\`.claude/skills/\` ship with this scaffold. Supported coding agents can
+discover guidance for tasks like *add an agent*, *add a UI*, *make an MCP
+App*, *call another agent*, and *troubleshoot a failure*. The skills are
+plain markdown — edit or delete any that do not fit your house style.
 `;
 }
 

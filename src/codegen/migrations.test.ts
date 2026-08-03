@@ -41,6 +41,7 @@ function manifestOf(agents: AgentEntry[]): Manifest {
     root: "/fake",
     agents,
     workflows: [],
+    wasmModules: [],
     features: { browser: false, email: false, emailResolverFile: null, voice: false },
   };
 }

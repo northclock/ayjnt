@@ -88,7 +88,7 @@ export async function compile(argv: string[]): Promise<void> {
   //    is still available to us.
   const compileDir = path.join(cwd, ".ayjnt", "compile");
   const bundleDir = path.join(compileDir, "bundle");
-  const { scriptPath } = await bundleWorker({
+  const { scriptPath, modulePaths } = await bundleWorker({
     cwd,
     wranglerPath: built.wranglerPath,
     outDir: bundleDir,
@@ -125,6 +125,8 @@ export async function compile(argv: string[]): Promise<void> {
       manifest: built.manifest,
       config,
       scriptPath,
+      moduleRoot: bundleDir,
+      modulePaths,
       assetsRoot,
       assetFiles,
       workerdPath,
@@ -136,6 +138,10 @@ export async function compile(argv: string[]): Promise<void> {
   log(`[ayjnt] compiling → ${path.relative(cwd, outfile) || outfile}`);
 
   const result = await Bun.build({
+    // Worker modules are already statically imported with `{ type: "file" }`
+    // by the generated bootstrap. A `.wasm` file cannot itself be a Bun
+    // executable entrypoint, so only UI assets retain the existing extra
+    // entrypoint treatment.
     entrypoints: [bootstrapPath, ...assetFiles],
     target: "bun",
     minify: args.minify,
@@ -222,6 +228,8 @@ type BootstrapOptions = {
   manifest: Manifest;
   config: GeneratedWranglerConfig;
   scriptPath: string;
+  moduleRoot: string;
+  modulePaths: string[];
   assetsRoot: string;
   assetFiles: string[];
   workerdPath: string | null;
@@ -255,6 +263,12 @@ import { runApp } from "ayjnt/internal/run";
 import { defaultDataDir, splitBinaryArgs } from "ayjnt/internal/host";`);
 
   lines.push(`import __workerScript from "${rel(opts.scriptPath)}" with { type: "file" };`);
+  const siblingModules = opts.modulePaths.filter(
+    (file) => path.resolve(file) !== path.resolve(opts.scriptPath),
+  );
+  for (const [i, file] of siblingModules.entries()) {
+    lines.push(`import __workerModule${i} from "${rel(file)}" with { type: "file" };`);
+  }
   if (opts.workerdPath) {
     lines.push(`import __workerd from "${rel(opts.workerdPath)}" with { type: "file" };`);
   }
@@ -274,12 +288,22 @@ import { defaultDataDir, splitBinaryArgs } from "ayjnt/internal/host";`);
     rel: path.relative(opts.assetsRoot, f).replace(/\\/g, "/"),
     ref: `__asset${i}`,
   }));
+  const moduleManifest = siblingModules.map((file, i) => ({
+    rel: path.relative(opts.moduleRoot, file).replace(/\\/g, "/"),
+    ref: `__workerModule${i}`,
+  }));
+  const scriptRel = path
+    .relative(opts.moduleRoot, opts.scriptPath)
+    .replace(/\\/g, "/");
 
   lines.push(`
 const CONFIG = ${JSON.stringify(opts.config)};
 const MANIFEST = ${JSON.stringify(stripManifestForRuntime(opts.manifest))};
 const ASSETS = [
 ${assetManifest.map((a) => `  { rel: ${JSON.stringify(a.rel)}, src: ${a.ref} },`).join("\n")}
+];
+const WORKER_MODULES = [
+${moduleManifest.map((a) => `  { rel: ${JSON.stringify(a.rel)}, src: ${a.ref} },`).join("\n")}
 ];
 const HOST_TOOL_MODULES = new Map([
 ${hostTools.map((t, i) => `  [${JSON.stringify(t.sourceFile)}, __hostTools${i}],`).join("\n")}
@@ -288,16 +312,21 @@ const WORKERD_VERSION = ${JSON.stringify(workerdVersion?.version ?? null)};
 const WORKERD_COMPAT_DATE = ${JSON.stringify(workerdVersion?.compatibilityDate ?? null)};
 
 /**
- * Materialize an embedded file on disk, skipping the write when an identical
- * copy is already there.
+ * Materialize an embedded file on disk. Only the version-keyed workerd binary
+ * may reuse a same-sized file; app modules and assets always overwrite because
+ * a rebuilt artifact can change without changing byte length.
  *
  * Matters most for workerd: it's ~103MB, and re-extracting it on every launch
  * would make startup miserable. Keyed by version so upgrading the binary
  * naturally invalidates the cache.
  */
-async function materialize(src: string, dest: string): Promise<string> {
+async function materialize(
+  src: string,
+  dest: string,
+  reuseSameSize = false,
+): Promise<string> {
   const embedded = Bun.file(src);
-  if (existsSync(dest)) {
+  if (reuseSameSize && existsSync(dest)) {
     const onDisk = Bun.file(dest);
     if (onDisk.size === embedded.size) return dest;
   }
@@ -316,7 +345,7 @@ async function main(): Promise<void> {
 ${
   opts.workerdPath
     ? `  const workerdDest = path.join(runtimeDir, "workerd-" + (WORKERD_VERSION ?? "embedded"));
-  await materialize(__workerd, workerdDest);
+  await materialize(__workerd, workerdDest, true);
   chmodSync(workerdDest, 0o755);
   process.env["AYJNT_WORKERD_PATH"] = workerdDest;
   if (WORKERD_VERSION) process.env["AYJNT_WORKERD_VERSION"] = WORKERD_VERSION;
@@ -331,8 +360,11 @@ ${
   }`
 }
 
-  const scriptDest = path.join(runtimeDir, "worker.js");
+  const scriptDest = path.join(runtimeDir, ${JSON.stringify(scriptRel)});
   await materialize(__workerScript, scriptDest);
+  for (const module of WORKER_MODULES) {
+    await materialize(module.src, path.join(runtimeDir, module.rel));
+  }
 
   let assetsDir: string | null = null;
   if (ASSETS.length > 0) {
@@ -397,6 +429,7 @@ function stripManifestForRuntime(manifest: Manifest): unknown {
       baseClass: a.baseClass,
     })),
     workflows: manifest.workflows,
+    wasmModules: [],
     features: manifest.features,
     rootApp: null,
     cliFile: manifest.cliFile ?? null,

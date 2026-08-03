@@ -12,6 +12,7 @@ function mf(
     root,
     agents,
     workflows,
+    wasmModules: [],
     features: {
       browser: false,
       email: false,

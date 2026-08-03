@@ -32,12 +32,12 @@ agents/ ────────────► Manifest
 
 | File | Role |
 |---|---|
-| [`scan.ts`](./scan.ts) | Walk `agents/**/agent.ts`, extract class/agentId, compute routes/bindings/middleware chains, detect `app.tsx` / `tools.ts` / `tools.host.ts` siblings and a root `cli.ts`. Produces `Manifest`. |
+| [`scan.ts`](./scan.ts) | Walk agent and workflow conventions, extract classes and agentIds, and compute routes, bindings, middleware, apps, tools, features, and the root `cli.ts`. Produces `Manifest`. |
 | [`cli.ts`](./cli.ts) | Emit `@ayjnt/cli` — the route-nested, camelized `agents` / `workflows` accessor types for a root-level `cli.ts`. Types only; the runtime objects are built by `../cli/host.ts` from the same manifest. Pure. |
 | [`migrations.ts`](./migrations.ts) | Read/write `.ayjnt/migrations.json`. `diffMigrations` + `applyDiff` + `nextTag` + `formatDiff`. |
 | [`wrangler.ts`](./wrangler.ts) | Emit the generated `wrangler.jsonc` string. Pure. |
-| [`entry.ts`](./entry.ts) | Emit the generated worker entrypoint string (routes, middleware dispatch, HTML-vs-agent disambiguation). Pure. |
-| [`client.ts`](./client.ts) | Generate `.ayjnt/tsconfig.json`, `env.d.ts`, per-agent typed `useAgent` hooks, and bundle `app.tsx` via `Bun.build`. |
+| [`entry.ts`](./entry.ts) | Emit routes, middleware dispatch, workflow exports, constructor registries, co-located workflow patches, and HTML-vs-agent disambiguation. Pure. |
+| [`client.ts`](./client.ts) | Generate `.ayjnt/tsconfig.json`, ambient environment/workflow declarations, typed CLI and React clients, and browser assets. |
 
 ## Contracts
 
@@ -89,26 +89,49 @@ Cloudflare's helper expects `/agents/{kebab-name}/{instance-id}/...`. We want `/
 
 The generated entrypoint still re-exports every agent class so wrangler can register them as DOs — that's the only constraint the SDK imposes.
 
-## Client-side generation (v0.3)
+## Generated runtime registries
+
+Every generated entry injects one non-enumerable class-to-binding map
+onto each agent prototype. Runtime
+`this.agent(TargetClass, name)` uses the constructor as both its
+inference source and lookup key, avoiding routes and binding strings in
+user code.
+
+Co-located workflows receive a separate binding patch. Ayjnt's
+`Agent.workflow(params)` reads it, while the ambient workflow registry
+supplies the payload type. The deprecated `withWorkflow` helper reads
+the same property for compatibility.
+
+## Generated authoring types
 
 Beyond the worker bundle, codegen also produces files user code imports from:
 
 ```
 .ayjnt/
-├── tsconfig.json               ← path aliases (@ayjnt/*, @ayjnt/env)
-├── env.d.ts                    ← GeneratedEnv type with every DO binding
+├── tsconfig.json               ← path aliases (@ayjnt/*, @ayjnt/cli)
+├── env.d.ts                    ← ambient Ayjnt.GeneratedEnv + WorkflowRegistry
 └── client/
     ├── cli.ts                  ← @ayjnt/cli — typed context for a root cli.ts
+    ├── modules/<path>.ts       ← @ayjnt/modules/<path> — typed Wasm proxy
     └── <route>/index.tsx       ← typed useAgent hook per agent
 ```
 
 `client/cli.ts` is emitted unconditionally, even without a root `cli.ts` — the
 types are useful while authoring one, and a types-only module costs nothing.
-Because `@ayjnt/cli` resolves to `client/cli.ts`, which TypeScript prefers over
-`client/cli/index.tsx`, an agent at `agents/cli/` would shadow it; `scan`-time
-validation rejects that route name (see `assertNoReservedClientRoutes`).
+Because `@ayjnt/cli` and `@ayjnt/modules/*` occupy generated client namespaces,
+agents whose first route segment is `cli` or `modules` would create ambiguous
+imports; build-time validation rejects those names (see
+`assertNoReservedClientRoutes`).
 
-User code imports via the `@ayjnt/*` alias defined in the generated tsconfig. The alias maps `@ayjnt/chat` → `.ayjnt/client/chat/index.tsx`. Users either `extends` the generated tsconfig or inline the paths (see main README).
+User code imports via the `@ayjnt/*` alias defined in the generated
+tsconfig. The ambient environment lets Ayjnt authors write
+`Agent<State>` while retaining the `GeneratedEnv` compatibility export
+for direct Cloudflare classes and older projects.
+
+For each co-located workflow, `env.d.ts` adds an
+`Ayjnt.WorkflowRegistry` entry containing the origin agent and workflow
+constructor. Runtime conditional types use it to type
+`this.workflow(params)`.
 
 ### Why generate per-agent hooks instead of one generic helper
 
@@ -122,13 +145,19 @@ The cost is a per-agent file instead of one shared helper. Cheap.
 
 ### Bundling `app.tsx`
 
-`bundleApp()` in `client.ts` calls `Bun.build` with `target: "browser"` on each agent's `app.tsx`. The output ES module is inlined as a string into the HTML shell, which is in turn inlined into `entry.ts` as a map from binding → HTML. One `<script type="module">…</script>` per agent, no asset fetching, no CORS.
+`bundleApp()` in `client.ts` calls `Bun.build` with `target: "browser"`
+for each `app.tsx`. JavaScript, CSS, and related outputs are written
+under `.ayjnt/assets/__ayjnt/<flat-route>/`; the generated HTML shell
+references them through the Assets binding.
 
 Gotchas in the bundler path:
 
 - **Order matters.** We generate `.ayjnt/client/<route>/index.tsx` *before* calling `Bun.build`, because the user's `app.tsx` imports from `@ayjnt/<route>` which resolves to that file. Bundling first → unresolved import.
-- **Tree-shaking is per-agent.** Each agent's bundle includes its own copy of React + agents/react. Two agents with `app.tsx` = ~2× the bundle size. Acceptable for v0.3; an Assets-binding-backed approach (shared chunks, browser caching) is future work.
-- **Worker size limit.** Cloudflare Workers bundle limit is 10 MB. Inlining bundles is fine until you have ~20 agents with full React UIs. At that point, move to `@cloudflare/workers-types` Assets binding.
+- **Tree-shaking is per app.** Each entry is bundled independently.
+  Add shared chunks only when measurements justify the extra manifest
+  complexity.
+- **Generated files are replaceable.** Renaming or removing an app
+  must clean its previous client and asset output.
 
 ### Why `html_handling: "none"` matters
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ayjnt State"
+  short_description: "Build durable state and SQLite agents"
+  default_prompt: "Use $ayjnt-state to add durable state to this Ayjnt agent."

@@ -1,6 +1,6 @@
 {
   "name": "ayjnt",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "A human-first agent harness framework powered by Bun and workerd.",
   "type": "module",
   "bin": {
@@ -95,6 +95,7 @@
   "files": [
     "src",
     "dist",
+    ".agents/skills",
     ".claude/skills",
     "README.md"
   ],

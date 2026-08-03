@@ -17,3 +17,16 @@ Open `/review/demo`. Workflow steps survive retries and restarts; the approval
 decision remains in the parent agent's durable state. Replace the small
 deterministic draft step with your model of choice without changing the
 architecture.
+
+The sibling files are connected by co-location:
+
+```ts
+// workflow.ts
+export default class ReviewWorkflow extends AgentWorkflow<Params> {}
+
+// agent.ts
+const workflowId = await this.workflow({ id, topic, sourceUrl });
+```
+
+There is no origin-agent generic, workflow mixin, or generated binding string
+in application code.

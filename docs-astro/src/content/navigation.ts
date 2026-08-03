@@ -30,6 +30,7 @@ export const docsNavigation = [
       { href: "/docs/inter-agent/", label: "Inter-agent RPC" },
       { href: "/docs/sub-agents/", label: "Sub-agents" },
       { href: "/docs/tools/", label: "Tools" },
+      { href: "/docs/wasm-modules/", label: "WebAssembly modules" },
     ],
   },
   {

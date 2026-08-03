@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ayjnt Scheduling"
+  short_description: "Schedule durable agent work safely"
+  default_prompt: "Use $ayjnt-scheduling to add durable scheduled work to this Ayjnt agent."
